@@ -1,0 +1,11 @@
+{
+  "manifestVersion": "1.0.0",
+  "freezeTimestamp": "2026-10-27T03:10:00Z",
+  "rubricPath": "bench/rubrics/starlette_rubric.json",
+  "rubricSha256": "b70c1bb175d43f66813986e9e7eec16afb1923b7983d0b025f06a77866f29624",
+  "auditedGraderPath": "bench/auditedGrader.ts",
+  "auditedGraderSha256": "14012af432594a45e7421940ed2e171ce0eefb00814328f172adc2be40069809",
+  "tasksCount": 6,
+  "goldFactsCount": 27,
+  "rubricVersion": "2.1.0"
+}

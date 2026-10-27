@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OSS Analyser — Developer Onboarding & Code Graph Copilot</title>
+  <script src="https://unpkg.com/cytoscape@3.28.1/dist/cytoscape.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+  <link rel="stylesheet" href="/css/styles.css?v=2" />
+</head>
+<body>
+
+  <!-- Live Ingestion & Summarization Pipeline Tracker -->
+  <div id="pipeline-tracker" class="pipeline-tracker" style="display: none;">
+    <div class="tracker-header">
+      <div class="tracker-title">
+        <i id="tracker-icon" class="fa-solid fa-diagram-project fa-spin-pulse" style="color: var(--primary);"></i>
+        <span id="tracker-heading">Pipeline in Progress</span>
+        <span id="tracker-percent-badge" class="badge">0%</span>
+      </div>
+      <button class="btn-icon" onclick="dismissTracker()" title="Dismiss Tracker"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+
+    <!-- 5-Stage Stepper -->
+    <div class="tracker-stepper">
+      <div class="tracker-step" id="tracker-step-1">
+        <div class="step-num">1</div>
+        <div class="step-label">Clone / Source</div>
+      </div>
+      <div class="step-divider" id="tracker-div-1"></div>
+      <div class="tracker-step" id="tracker-step-2">
+        <div class="step-num">2</div>
+        <div class="step-label">AST Graph</div>
+      </div>
+      <div class="step-divider" id="tracker-div-2"></div>
+      <div class="tracker-step" id="tracker-step-3">
+        <div class="step-num">3</div>
+        <div class="step-label">Checkpoint 1</div>
+      </div>
+      <div class="step-divider" id="tracker-div-3"></div>
+      <div class="tracker-step" id="tracker-step-4">
+        <div class="step-num">4</div>
+        <div class="step-label">LLM Summary</div>
+      </div>
+      <div class="step-divider" id="tracker-div-4"></div>
+      <div class="tracker-step" id="tracker-step-5">
+        <div class="step-num">5</div>
+        <div class="step-label">Finalized</div>
+      </div>
+    </div>
+
+    <!-- Progress Bar -->
+    <div class="tracker-progress-bar">
+      <div id="tracker-fill" class="tracker-fill" style="width: 0%;"></div>
+    </div>
+
+    <!-- Detailed Live Status Info -->
+    <div class="tracker-footer">
+      <div id="tracker-status-message" class="tracker-status-message">Initializing...</div>
+      <div id="tracker-sub-details" class="tracker-sub-details" style="font-size: 0.75rem; color: var(--text-muted);"></div>
+    </div>
+  </div>
+
+  <!-- App Layout: Left Sidebar + Main Content (ChatGPT-style) -->
+  <div class="app-layout">
+
+    <!-- Left Sidebar: Projects with Nested Chat Histories -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <div class="brand">
+          <i class="fa-solid fa-diagram-project"></i>
+          <span>OSS Analyser</span>
+        </div>
+      </div>
+
+      <div class="sidebar-action-bar">
+        <button class="btn btn-primary btn-block" onclick="openIngestModal()">
+          <i class="fa-solid fa-plus"></i> Ingest Repository
+        </button>
+      </div>
+
+      <!-- Projects List with Nested Chats beneath each project -->
+      <div class="sidebar-scrollable">
+        <div class="sidebar-section-title">Projects & Histories</div>
+        <div id="projects-sidebar-list" class="projects-sidebar-list">
+          <div style="padding: 16px; color: var(--text-muted); font-size: 0.8rem; text-align: center;">
+            <i class="fa-solid fa-spinner fa-spin"></i> Loading projects...
+          </div>
+        </div>
+      </div>
+
+      <!-- Bottom User / Auth Status -->
+      <div class="sidebar-footer">
+        <div id="auth-footer-container">
+          <button id="btn-login-open" class="btn btn-secondary btn-block" onclick="openAuthModal()">
+            <i class="fa-solid fa-user-lock"></i> Sign In / Account
+          </button>
+          <div id="user-badge" style="display: none; align-items: center; justify-content: space-between; width: 100%;">
+            <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.8rem;">
+              <i class="fa-solid fa-user" style="color: var(--primary); margin-right: 4px;"></i>
+              <span id="user-email-display" style="color: var(--text-main);"></span>
+            </div>
+            <div style="display: flex; gap: 4px;">
+              <button class="btn-icon-small" onclick="openApiKeyModal()" title="API Keys"><i class="fa-solid fa-key"></i></button>
+              <button class="btn-icon-small" onclick="signOut()" title="Sign Out"><i class="fa-solid fa-arrow-right-from-bracket"></i></button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main View Area -->
+    <main class="main-content">
+
+      <!-- View 1: ChatGPT-like Conversation View (Primary) -->
+      <section id="view-chat" class="view-panel active">
+        <div class="chat-topbar">
+          <div class="chat-topbar-left">
+            <button class="btn-icon mobile-menu-btn" onclick="toggleSidebar()"><i class="fa-solid fa-bars"></i></button>
+            <div class="chat-thread-info">
+              <span id="chat-repo-name" class="chat-repo-badge">No Project Selected</span>
+              <span class="chat-breadcrumb-divider">/</span>
+              <span id="chat-thread-title" class="chat-thread-title">Select a chat or start a new conversation</span>
+            </div>
+          </div>
+          <div class="chat-topbar-actions">
+            <button id="btn-chat-view-graph" class="btn btn-secondary btn-sm" onclick="switchToGraphView()" style="display: none;">
+              <i class="fa-solid fa-circle-nodes"></i> View Code Graph
+            </button>
+            <button id="btn-chat-summarize" class="btn btn-secondary btn-sm" onclick="openResumeModal()" style="display: none;">
+              <i class="fa-solid fa-play"></i> Summarize
+            </button>
+          </div>
+        </div>
+
+        <!-- Scrollable Conversation Feed -->
+        <div class="chat-feed-container" id="chat-feed-container">
+          <div class="chat-feed-inner" id="chat-messages">
+            <div class="chat-welcome-state">
+              <div class="welcome-icon"><i class="fa-solid fa-comments"></i></div>
+              <h3>Codebase Q&A Copilot</h3>
+              <p>Select a project from the left sidebar to start chatting about its architecture, functions, and blast radius impact.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- ChatGPT-style Bottom Prompt Input Bar -->
+        <div class="chat-input-area">
+          <div class="chat-input-wrapper">
+            <textarea id="chat-input" class="chat-textarea" placeholder="Ask a question about this codebase..." rows="1" onkeydown="handleChatKeydown(event)"></textarea>
+            <button id="btn-send-chat" class="btn-send" onclick="sendChat()" title="Send Message">
+              <i class="fa-solid fa-arrow-up"></i>
+            </button>
+          </div>
+          <div class="chat-disclaimer">
+            Graph-Augmented RAG with full AST implementation context & Blast Radius citations.
+          </div>
+        </div>
+      </section>
+
+      <!-- View 2: Cytoscape Dependency Graph Explorer -->
+      <section id="view-graph" class="view-panel">
+        <div class="graph-topbar">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <button class="btn btn-primary btn-sm" onclick="switchToChatView()">
+              <i class="fa-solid fa-comments"></i> Back to Chat
+            </button>
+            <span id="graph-repo-heading" style="font-weight: 600; color: var(--text-main); font-size: 0.9rem;"></span>
+          </div>
+          <div class="graph-controls">
+            <button onclick="setLayout('cose')"><i class="fa-solid fa-circle-nodes"></i> Force</button>
+            <button onclick="setLayout('breadthfirst')"><i class="fa-solid fa-sitemap"></i> Topo</button>
+            <button onclick="resetHighlights()"><i class="fa-solid fa-eye"></i> Reset</button>
+            <button onclick="fitGraph()"><i class="fa-solid fa-compress"></i> Fit</button>
+            <input type="text" id="node-search" class="graph-search-input" placeholder="Search symbol..." oninput="onNodeSearch(this.value)" />
+          </div>
+        </div>
+
+        <div class="graph-content-wrapper">
+          <div class="graph-canvas-box">
+            <div class="graph-legend">
+              <div class="legend-item"><div class="legend-dot" style="background: #3b82f6;"></div> Function / Method</div>
+              <div class="legend-item"><div class="legend-dot" style="background: #10b981;"></div> File / Module</div>
+              <div class="legend-item"><div class="legend-dot" style="background: #f59e0b;"></div> Directory Subsystem</div>
+              <div class="legend-item"><div class="legend-dot" style="background: #ef4444;"></div> Blast Radius Impact</div>
+            </div>
+            <div id="graph-empty-state" class="graph-empty-overlay">
+              <i class="fa-solid fa-diagram-project"></i>
+              <h4>No Code Graph Loaded</h4>
+              <p>Select an ingested project or ingest a new codebase to explore its AST architecture.</p>
+              <button class="btn" style="margin: 0 auto;" onclick="openIngestModal()"><i class="fa-solid fa-plus"></i> Ingest Repository</button>
+            </div>
+            <div id="cy"></div>
+          </div>
+
+          <!-- Node Inspector Slide-out Panel on the Right -->
+          <div class="graph-inspector-pane">
+            <div class="inspector-header">
+              <span><i class="fa-solid fa-circle-info"></i> Node Inspector</span>
+            </div>
+            <div id="inspector-placeholder" class="inspector-placeholder">
+              Click on any node in the dependency graph to inspect its code, hierarchical summary, Git ownership, and blast radius.
+            </div>
+            <div id="inspector-details" style="display: none;">
+              <div class="inspector-title" id="node-name"></div>
+              <div class="inspector-path" id="node-file"></div>
+
+              <div class="card">
+                <div class="card-title"><i class="fa-solid fa-sparkles" style="color: var(--primary);"></i> Gemini Hierarchical Summary</div>
+                <p id="node-summary"></p>
+              </div>
+
+              <div class="card">
+                <div class="card-title"><i class="fa-solid fa-user-check" style="color: var(--accent);"></i> Git Ownership & Authors</div>
+                <div id="node-ownership"></div>
+              </div>
+
+              <div class="card">
+                <div class="card-title"><i class="fa-solid fa-triangle-exclamation" style="color: var(--danger);"></i> Blast Radius Impact</div>
+                <div id="node-blast-radius"></div>
+              </div>
+
+              <div class="card">
+                <div class="code-header">
+                  <div class="card-title" style="margin-bottom: 0;"><i class="fa-solid fa-code"></i> Code Snippet</div>
+                  <button class="btn-icon-small" onclick="copyNodeCode()"><i class="fa-solid fa-copy"></i> Copy</button>
+                </div>
+                <pre class="code-preview" id="node-code"></pre>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- Modal 1: Supabase Sign In / Sign Up -->
+  <div id="auth-modal" class="modal-overlay">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 id="auth-modal-title"><i class="fa-solid fa-user-shield" style="color: var(--primary);"></i> Account Authentication</h3>
+        <button class="modal-close" onclick="closeAuthModal()">&times;</button>
+      </div>
+
+      <div class="auth-tabs">
+        <button id="tab-btn-signin" class="auth-tab active" onclick="switchAuthTab('signin')">Sign In</button>
+        <button id="tab-btn-signup" class="auth-tab" onclick="switchAuthTab('signup')">Sign Up</button>
+      </div>
+
+      <div id="auth-alert" class="auth-alert"></div>
+
+      <form id="auth-form" onsubmit="handleAuthSubmit(event)">
+        <div class="auth-form-group">
+          <label for="auth-email">Email Address</label>
+          <input type="email" id="auth-email" placeholder="developer@domain.com" required />
+        </div>
+
+        <div class="auth-form-group">
+          <label for="auth-password">Password</label>
+          <input type="password" id="auth-password" placeholder="••••••••" minlength="6" required />
+        </div>
+
+        <button type="submit" id="auth-submit-btn" class="btn" style="width: 100%; margin-top: 8px;">
+          <i class="fa-solid fa-arrow-right-to-bracket"></i> Sign In
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal 2: API Keys for CLI & AI Agent Harness -->
+  <div id="apikey-modal" class="modal-overlay">
+    <div class="modal-content" style="max-width: 520px;">
+      <div class="modal-header">
+        <h3><i class="fa-solid fa-key" style="color: var(--warning);"></i> API Keys for CLI & AI Agent Harness</h3>
+        <button class="modal-close" onclick="closeApiKeyModal()">&times;</button>
+      </div>
+
+      <p style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 14px;">
+        Use these keys to authenticate the <b>Interactive Terminal CLI</b> or your <b>AI Coding Agent Harness</b> (e.g. SWE-bench, Claude, Cursor) with 90% fewer tokens.
+      </p>
+
+      <div id="key-new-container" style="display: none; background: rgba(16, 185, 129, 0.15); border: 1px solid var(--accent); padding: 12px; border-radius: 6px; margin-bottom: 14px;">
+        <div style="font-size: 0.8rem; color: #6ee7b7; font-weight: 600; margin-bottom: 4px;">New API Key Created (copy now, it will not be shown again):</div>
+        <div style="display: flex; gap: 8px; align-items: center;">
+          <input type="text" id="new-key-value" readonly style="flex: 1; background: var(--bg-dark); border: 1px solid var(--border-color); color: var(--text-main); padding: 6px 10px; border-radius: 4px; font-family: monospace; font-size: 0.8rem;" />
+          <button class="btn btn-secondary" onclick="copyNewKey()"><i class="fa-solid fa-copy"></i></button>
+        </div>
+      </div>
+
+      <div style="display: flex; gap: 8px; margin-bottom: 14px;">
+        <input type="text" id="new-key-name" placeholder="Key name (e.g. SWE-bench Agent, Terminal CLI)" style="flex: 1; background: var(--bg-dark); border: 1px solid var(--border-color); border-radius: 6px; padding: 8px 12px; color: var(--text-main); font-size: 0.84rem;" />
+        <button class="btn" onclick="generateApiKey()"><i class="fa-solid fa-plus"></i> Generate</button>
+      </div>
+
+      <div style="font-size: 0.82rem; font-weight: 600; margin-bottom: 8px; color: var(--text-muted);">Active Keys:</div>
+      <div id="api-keys-list" style="max-height: 180px; overflow-y: auto;">
+        <div style="text-align: center; color: var(--text-muted); font-size: 0.8rem; padding: 12px;">Loading active keys...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal 3: Ingest New Repository -->
+  <div id="ingest-modal" class="modal-overlay">
+    <div class="modal-content" style="max-width: 500px;">
+      <div class="modal-header">
+        <h3><i class="fa-solid fa-cloud-arrow-up" style="color: var(--primary);"></i> Ingest Repository</h3>
+        <button class="modal-close" onclick="closeIngestModal()">&times;</button>
+      </div>
+
+      <div class="auth-tabs" style="margin-bottom: 14px;">
+        <button type="button" id="tab-source-github" class="auth-tab active" onclick="switchIngestSource('github')">
+          <i class="fa-brands fa-github"></i> GitHub URL
+        </button>
+        <button type="button" id="tab-source-local" class="auth-tab" onclick="switchIngestSource('local')">
+          <i class="fa-solid fa-folder"></i> Local Directory
+        </button>
+      </div>
+
+      <div id="demo-mode-notice" class="auth-alert" style="display: none; background: rgba(59, 130, 246, 0.15); border: 1px solid var(--primary); color: #93c5fd; margin-bottom: 14px;">
+        <i class="fa-solid fa-shield-halved"></i> <b>Public Demo:</b> Ingestion of new codebases requires the Admin Key to protect Gemini API quota. Feel free to explore the indexed repositories in the dropdown, or run locally via Docker!
+      </div>
+
+      <form id="ingest-form" onsubmit="handleIngestSubmit(event)">
+        <!-- GitHub Source Option -->
+        <div id="group-github-url" class="auth-form-group">
+          <label for="ingest-github-url"><i class="fa-brands fa-github"></i> GitHub Repository URL *</label>
+          <input type="url" id="ingest-github-url" placeholder="https://github.com/expressjs/express" />
+          <span style="font-size: 0.73rem; color: var(--text-muted); display: block; margin-top: 4px;">
+            Cloned shallowly (<span style="font-family: monospace;">--depth 1</span>) into DB and immediately deleted from disk.
+          </span>
+        </div>
+
+        <!-- Local Path Option -->
+        <div id="group-local-path" class="auth-form-group" style="display: none;">
+          <label for="ingest-root-path"><i class="fa-solid fa-folder"></i> Local Repository Root Path *</label>
+          <input type="text" id="ingest-root-path" placeholder="e.g. C:\projects\my-app or /home/user/my-app" />
+        </div>
+
+        <div class="auth-form-group">
+          <label for="ingest-name">Repository Display Name (optional)</label>
+          <input type="text" id="ingest-name" placeholder="Auto-derived from repo name" />
+        </div>
+
+        <div id="group-graph-path" class="auth-form-group">
+          <label for="ingest-graph-path">Graphify JSON Path (optional)</label>
+          <input type="text" id="ingest-graph-path" placeholder="Auto-detected or generated via built-in AST scanner" />
+        </div>
+
+        <!-- Admin Key (Only for Hosted Demo) -->
+        <div id="group-admin-key" class="auth-form-group" style="display: none;">
+          <label for="ingest-admin-key"><i class="fa-solid fa-lock"></i> Admin Ingest Key</label>
+          <input type="password" id="ingest-admin-key" placeholder="Enter ADMIN_INGEST_KEY to authorize" />
+        </div>
+
+        <div id="ingest-error-alert" class="auth-alert error"></div>
+
+        <button type="submit" id="ingest-submit-btn" class="btn" style="width: 100%; margin-top: 8px;">
+          <i class="fa-solid fa-play"></i> Start Ingestion Pipeline
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Delete Repository Confirmation Modal -->
+  <div id="delete-repo-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-card" style="max-width: 440px;">
+      <div class="modal-header">
+        <h3 style="color: #f87171;"><i class="fa-solid fa-triangle-exclamation"></i> Delete Repository</h3>
+        <button class="modal-close-btn" onclick="closeDeleteModal()"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <p style="font-size: 0.88rem; color: var(--text-main); margin-bottom: 14px;">
+        Are you sure you want to delete <b id="delete-repo-name-display" style="color: white;">this repository</b>?
+      </p>
+      <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 16px;">
+        This will permanently erase all AST nodes, call edges, git authorship, and LLM summaries from PostgreSQL. This action cannot be undone.
+      </p>
+      <div id="group-delete-admin-key" class="auth-form-group" style="display: none; margin-bottom: 14px;">
+        <label for="delete-admin-key"><i class="fa-solid fa-lock"></i> Admin Key (Required for Demo)</label>
+        <input type="password" id="delete-admin-key" placeholder="Enter ADMIN_INGEST_KEY" />
+      </div>
+      <div id="delete-error-alert" class="auth-alert error"></div>
+      <div style="display: flex; justify-content: flex-end; gap: 10px;">
+        <button class="btn btn-secondary" onclick="closeDeleteModal()">Cancel</button>
+        <button id="btn-confirm-delete" class="btn btn-danger" onclick="executeDeleteRepo()">
+          <i class="fa-solid fa-trash-can"></i> Permanently Delete
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Resume / Restart Summarization Modal -->
+  <div id="resume-summary-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-card" style="max-width: 480px;">
+      <div class="modal-header">
+        <h3><i class="fa-solid fa-wand-magic-sparkles" style="color: var(--primary);"></i> Summarization Pipeline</h3>
+        <button class="modal-close-btn" onclick="closeResumeModal()"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <p style="font-size: 0.88rem; color: var(--text-main); margin-bottom: 8px;">
+        Repository: <b id="resume-repo-name-display" style="color: white;"></b>
+      </p>
+      <p style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 16px;">
+        Current Progress: <span id="resume-repo-stats-display" style="color: var(--primary); font-weight: 600;">0/0 summarized</span>
+      </p>
+
+      <div style="background: var(--bg-dark); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px; margin-bottom: 14px;">
+        <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer; margin-bottom: 10px;">
+          <input type="radio" name="summary-mode" value="resume" checked style="margin-top: 3px;" />
+          <div>
+            <div style="font-weight: 600; font-size: 0.86rem; color: var(--text-main);">Resume from Checkpoint (Recommended)</div>
+            <div style="font-size: 0.76rem; color: var(--text-muted);">Skips functions already summarized to save Gemini tokens and finish quickly.</div>
+          </div>
+        </label>
+        <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer;">
+          <input type="radio" name="summary-mode" value="restart" style="margin-top: 3px;" />
+          <div>
+            <div style="font-weight: 600; font-size: 0.86rem; color: var(--text-main);">Restart From Scratch</div>
+            <div style="font-size: 0.76rem; color: var(--text-muted);">Clears previous summaries and regenerates all function, file, and architecture summaries.</div>
+          </div>
+        </label>
+      </div>
+
+      <div id="group-resume-admin-key" class="auth-form-group" style="display: none; margin-bottom: 14px;">
+        <label for="resume-admin-key"><i class="fa-solid fa-lock"></i> Admin Key (Required for Demo)</label>
+        <input type="password" id="resume-admin-key" placeholder="Enter ADMIN_INGEST_KEY" />
+      </div>
+
+      <div id="resume-error-alert" class="auth-alert error"></div>
+
+      <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 10px;">
+        <button class="btn btn-secondary" onclick="closeResumeModal()">Cancel</button>
+        <button class="btn" onclick="executeResumeSummarization()">
+          <i class="fa-solid fa-play"></i> Start Pipeline
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/app.js?v=3"></script>
+</body>
+</html>

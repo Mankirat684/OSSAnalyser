@@ -1,0 +1,67 @@
+version: "3.8"
+
+services:
+  # Redis for BullMQ Queue & Worker
+  redis:
+    image: redis:7-alpine
+    container_name: ossanalyser-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # PostgreSQL with pgvector extension
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: ossanalyser-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword
+      POSTGRES_DB: ossanalyser
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+  # OSS Analyser Node.js Backend & Ingestion Worker
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ossanalyser-app
+    ports:
+      - "4000:4000"
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      DATABASE_URL: postgresql://postgres:postgrespassword@postgres:5432/ossanalyser
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      IS_HOSTED_DEMO: ${IS_HOSTED_DEMO:-false}
+      ADMIN_INGEST_KEY: ${ADMIN_INGEST_KEY:-}
+    volumes:
+      - ./public:/app/public
+      - ./dist:/app/dist
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  redis_data:
+  postgres_data:

@@ -1,0 +1,640 @@
+{
+  "baseline": [
+    {
+      "arm": "baseline",
+      "taskId": "q6_blast_radius",
+      "question": "What is the blast radius and architectural impact of modifying the middleware pipeline in Starlette?",
+      "turns": 8,
+      "promptTokens": 14111,
+      "completionTokens": 1448,
+      "totalTokens": 15559,
+      "toolContextTokens": 2843,
+      "costUSD": 0.0014927249999999999,
+      "durationMs": 40169,
+      "toolCallsCount": {
+        "list_dir": 4,
+        "grep": 1,
+        "read_file": 2
+      },
+      "keyFactCoverage": 87.5,
+      "grades": [
+        {
+          "factId": "q6_fact_1",
+          "fact": "Middleware class encapsulates middleware class and kwargs instantiated during Starlette.build_middleware_stack()",
+          "verdict": "COVERED",
+          "score": 1,
+          "citation": "\"Middleware components are composed lazily during application startup or upon the first incoming request via `Starlette.build_middleware_stack()` in [`starlette/...\""
+        },
+        {
+          "factId": "q6_fact_2",
+          "fact": "BaseHTTPMiddleware provides dispatch(request, call_next) abstraction for custom request interceptors",
+          "verdict": "PARTIAL",
+          "score": 0.5,
+          "citation": "\"* **`starlette.middleware.base.BaseHTTPMiddleware`** (if utilized): Provides a higher-level request/response abstraction (`dispatch` method), whose internal con...\""
+        },
+        {
+          "factId": "q6_fact_3",
+          "fact": "Pipeline modification directly impacts Core middlewares: ServerErrorMiddleware, ExceptionMiddleware, AuthenticationMiddleware",
+          "verdict": "COVERED",
+          "score": 1,
+          "citation": "\"Moving a middleware inside or outside `ExceptionMiddleware` or `AuthenticationMiddleware` determines whether endpoints or subsequent middleware can access `requ...\""
+        },
+        {
+          "factId": "q6_fact_4",
+          "fact": "Affects all downstream ASGI endpoints by altering request wrapping, header mutation, and exception bubbling",
+          "verdict": "COVERED",
+          "score": 1,
+          "citation": "\"Moving a middleware inside or outside `ExceptionMiddleware` or `AuthenticationMiddleware` determines whether endpoints or subsequent middleware can access `requ...\""
+        }
+      ],
+      "finalAnswer": "Modifying the middleware pipeline in Starlette carries a **broad structural and runtime blast radius**, directly impacting request/response lifecycle execution, exception propagation, request body ingestion, lifespan context handling, and state sharing across the entire application stack.\n\n---\n\n### 1. Architectural Impact & Pipeline Composition\n\nStarlette uses a onion-like middleware architecture built around the standard ASGI callable protocol (`scope`, `receive`, `send`). Middleware components are composed lazily during application startup or upon the first incoming request via `Starlette.build_middleware_stack()` in [`starlette/applications.py`](starlette/applications.py).\n\nAs defined in `Starlette.__init__` and `Starlette.build_middleware_stack()`, the pipeline automatically wraps applications with a fixed order:\n1. **Outermost**: `ServerErrorMiddleware` ([`starlette/middleware/errors.py`](starlette/middleware/errors.py)) — Catches unhandled exceptions across the entire stack and formats them (providing tracebacks in debug mode).\n2. **Optional**: `RequestBodyLimitMiddleware` ([`starlette/middleware/body_limit.py`](starlette/middleware/body_limit.py)) — Enforces `max_body_size` limits on incoming HTTP payloads.\n3. **User-defined Middleware**: Injected via `middleware=` in `Starlette(...)` or dynamically via `Starlette.add_middleware()`, evaluated in *reverse order* so that the first middleware added wraps closest to the outside.\n4. **Innermost**: `ExceptionMiddleware` ([`starlette/middleware/exceptions.py`](starlette/middleware/exceptions.py)) — Handles HTTP status code exceptions (e.g., 404, 403) and custom registered exception handlers during routing/endpoints.\n5. **Core Application/Router**: `starlette.routing.Router` ([`starlette/routing.py`](starlette/routing.py)).\n\n---\n\n### 2. Specific Blast Radius of Pipeline Changes\n\nModifying how middleware is registered, ordered, or executed creates impacts across several tightly coupled domains:\n\n#### A. Request Lifecycle & ASGI Compliance (`Scope`, `Receive`, `Send`)\nEach middleware in Starlette acts as an ASGI middleware adhering to `starlette.types.ASGIApp`. Changing the pipeline contract or altering how `receive`/`send` callables are wrapped breaks transparent protocol forwarding for HTTP and WebSocket scopes. For example:\n* **Lifespan Scopes (`scope[\"type\"] == \"lifespan\"`)**: Middleware positioned outside the `Router` will intercept lifespan messages (`lifespan.startup`, `lifespan.shutdown`). If a custom middleware fails to properly forward or check `scope[\"type\"]`, startup/shutdown events can silently fail or hang.\n* **WebSockets (`scope[\"type\"] == \"websocket\"`)**: Middlewares that inspect or consume request bodies (like `GZipMiddleware` or body parsers) must explicitly bypass or handle non-HTTP scopes to prevent breaking persistent WebSocket frame streaming.\n\n#### B. State Isolation & Context Sharing\nStarlette applications attach the application instance to the ASGI scope:\n```python\nscope[\"app\"] = self\n```\nFurthermore, request-scoped data (such as `request.state` or `request.user` populated by `AuthenticationMiddleware` in [`starlette/middleware/authentication.py`](starlette/middleware/authentication.py)) depends strictly on the ordering of the middleware pipeline. Moving a middleware inside or outside `ExceptionMiddleware` or `AuthenticationMiddleware` determines whether endpoints or subsequent middleware can access `request.user`, session data (`SessionMiddleware`), or CORS headers.\n\n#### C. Exception Handling Inversion\nThe strict positioning of `ServerErrorMiddleware` (outermost) and `ExceptionMiddleware` (innermost) means any custom middleware placed *outside* `ServerErrorMiddleware` will handle exceptions *before* standard Starlette debugging or 500 error formatting can occur. Conversely, placing middleware *inside* `ExceptionMiddleware` means exceptions raised within that middleware will bypass user-defined HTTP exception handlers (e.g., custom 404/500 handlers) and fall back to raw server errors.\n\n#### D. Immutability Guardrails & Startup Race Conditions\nStarlette enforces strict immutability once the ASGI application starts handling requests:\n```python\ndef add_middleware(self, middleware_class: _MiddlewareFactory[P], *args: P.args, **kwargs: P.kwargs) -> None:\n    if self.middleware_stack is not None:\n        raise RuntimeError(\"Cannot add middleware after an application has started\")\n    self.user_middleware.insert(0, Middleware(middleware_class, *args, **kwargs))\n```\nAttempting to alter the middleware stack post-startup raises a `RuntimeError`. Any architectural modification that bypasses `build_middleware_stack()` or attempts dynamic per-request middleware injection violates this lifecycle guarantee and introduces thread-safety hazards during stack construction.\n\n---\n\n### 3. Summary of Core Symbols & Files Involved\n\n* **`starlette.applications.Starlette`** ([`starlette/applications.py`](starlette/applications.py)): Manages `user_middleware`, `middleware_stack`, and `build_middleware_stack()`.\n* **`starlette.middleware.Middleware`** ([`starlette/middleware/__init__.py`](starlette/middleware/__init__.py)): Value object holding middleware class references (`cls`), positional arguments (`args`), and keyword arguments (`kwargs`).\n* **`starlette.middleware.errors.ServerErrorMiddleware`** ([`starlette/middleware/errors.py`](starlette/middleware/errors.py)): Outermost error-catching boundary.\n* **`starlette.middleware.exceptions.ExceptionMiddleware`** ([`starlette/middleware/exceptions.py`](starlette/middleware/exceptions.py)): Innermost exception mapping boundary.\n* **`starlette.middleware.base.BaseHTTPMiddleware`** (if utilized): Provides a higher-level request/response abstraction (`dispatch` method), whose internal concurrency and body-streaming mechanics are deeply sensitive to pipeline placement."
+    },
+    {
+      "arm": "baseline",
+      "taskId": "q2_asgi_dispatch",
+      "question": "What is the main entry point and ASGI lifecycle dispatch for Starlette applications?",
+      "turns": 8,
+      "promptTokens": 16693,
+      "completionTokens": 1685,
+      "totalTokens": 18378,
+      "toolContextTokens": 3900,
+      "costUSD": 0.0017574749999999999,
+      "durationMs": 40508,
+      "toolCallsCount": {
+        "list_dir": 2,
+        "grep": 2,
+        "read_file": 3
+      },
+      "keyFactCoverage": 100,
+      "grades": [
+        {
+          "factId": "q2_fact_1",
+          "fact": "Starlette class is ASGI3 application implementing async def __call__(scope, receive, send)",
+          "verdict": "COVERED",
+          "score": 1,
+          "citation": "\"async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:...\""
+        },
+        {
+          "factId": "q2_fact_2",
+          "fact": "Dispatch branches by scope['type'] handling 'http', 'websocket', and 'lifespan' events",
+          "verdict": "COVERED",
+          "score": 1,
+          "citation": "\"assert scope[\"type\"] in (\"http\", \"websocket\", \"lifespan\")...\""
+        },
+        {
+          "factId": "q2_fact_3",
+          "fact": "Lifespan events manage startup and shutdown state via Lifespan or Router.lifespan context handlers",
+          "verdict": "COVERED",
+          "score": 1,
+          "citation": "\"Managed by **`Router.lifespan`**, this handles application startup and shutdown events using context managers (such as `@asynccontextmanager`):...\""
+        },
+        {
+          "factId": "q2_fact_4",
+          "fact": "build_middleware_stack() constructs nested ASGI callable chain wrapping Router with user and default middlewares in reverse order",
+          "verdict": "COVERED",
+          "score": 1,
+          "citation": "\"When an application receives its first request or lifespan signal, `build_middleware_stack` constructs a nested onion-skin execution stack of ASGI middleware wr...\""
+        },
+        {
+          "factId": "q2_fact_5",
+          "fact": "Uncaught exceptions during dispatch are caught by ServerErrorMiddleware and ExceptionMiddleware",
+          "verdict": "COVERED",
+          "score": 1,
+          "citation": "\"**`ServerErrorMiddleware`** (`starlette/middleware/errors.py`): Placed outermost to catch uncaught exceptions anywhere in the application stack and return 500 e...\""
+        }
+      ],
+      "finalAnswer": "In Starlette, applications adhere strictly to the [ASGI (Asynchronous Server Gateway Interface) specification](https://asgi.readthedocs.io/). The execution flow bridges the ASGI server (such as Uvicorn) down to individual route handlers, managing middleware stacking, request/response lifecycles, and application startup/shutdown events.\n\n---\n\n### 1. Main Entry Point: `Starlette.__call__`\n\nThe primary public-facing entry point for any Starlette application is the `Starlette` class defined in [`starlette/applications.py`](starlette/applications.py). \n\nAn ASGI server interacts with an ASGI application by invoking it as a callable taking three arguments: `scope`, `receive`, and `send`. In Starlette, this is implemented by `Starlette.__call__`:\n\n```python\n# starlette/applications.py\nclass Starlette:\n    ...\n    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:\n        scope[\"app\"] = self\n        if self.middleware_stack is None:\n            self.middleware_stack = self.build_middleware_stack()\n        await self.middleware_stack(scope, receive, send)\n```\n\n#### Middleware Stack Building (`build_middleware_stack`)\nWhen an application receives its first request or lifespan signal, `build_middleware_stack` constructs a nested onion-skin execution stack of ASGI middleware wrapping around the underlying core `Router` instance (found in `self.router`). \n\nThe default middleware composition includes:\n1. **`ServerErrorMiddleware`** (`starlette/middleware/errors.py`): Placed outermost to catch uncaught exceptions anywhere in the application stack and return 500 error pages (or debug tracebacks).\n2. **`RequestBodyLimitMiddleware`** (`starlette/middleware/body_limit.py`): Optional body-size limiting middleware (if `max_body_size` is configured).\n3. **User-defined middleware**: Custom middleware passed via the `middleware=` argument or added via `app.add_middleware(...)`.\n4. **`ExceptionMiddleware`** (`starlette/middleware/exceptions.py`): Placed innermost to catch exceptions raised during routing and endpoint execution (such as `HTTPException`) and map them to configured exception handlers.\n5. **Core Router**: The inner application handler (`self.router`).\n\n---\n\n### 2. ASGI Lifecycle Dispatch: `Router.__call__` and `Router.app`\n\nOnce the middleware stack is traversed, control is handed over to the core `Router` class located in [`starlette/routing.py`](starlette/routing.py).\n\n`Router.__call__` simply delegates to its internal `middleware_stack` (which defaults to `self.app`):\n\n```python\n# starlette/routing.py\nclass Router:\n    ...\n    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:\n        \"\"\"\n        The main entry point to the Router class.\n        \"\"\"\n        await self.middleware_stack(scope, receive, send)\n```\n\nThe actual core dispatch mechanism resides in **`Router.app`**:\n\n```python\n    async def app(self, scope: Scope, receive: Receive, send: Send) -> None:\n        assert scope[\"type\"] in (\"http\", \"websocket\", \"lifespan\")\n\n        if \"router\" not in scope:\n            scope[\"router\"] = self\n\n        # 1. Lifespan Event Dispatch\n        if scope[\"type\"] == \"lifespan\":\n            await self.lifespan(scope, receive, send)\n            return\n\n        partial = None\n\n        # 2. HTTP / WebSocket Route Matching & Dispatch\n        for route in self.routes:\n            match, child_scope = route.matches(scope)\n            if match is Match.FULL:\n                scope[\"route\"] = route\n                scope.update(child_scope)\n                await route.handle(scope, receive, send)\n                return\n            elif match is Match.PARTIAL and partial is None:\n                partial = route\n                partial_scope = child_scope\n\n        if partial is not None:\n            scope[\"route\"] = partial\n            scope.update(partial_scope)\n            await partial.handle(scope, receive, send)\n            return\n\n        # 3. Trailing Slash Redirection handling (for HTTP)\n        ...\n        # 4. Fallback Default (404 Not Found)\n        await self.default(scope, receive, send)\n```\n\nDepending on the `scope[\"type\"]` field dictated by the ASGI server specification, the dispatch branches into distinct execution lifecycles:\n\n---\n\n### 3. Detailed ASGI Lifecycles\n\n#### A. Lifespan Lifecycle (`scope[\"type\"] == \"lifespan\"`)\nManaged by **`Router.lifespan`**, this handles application startup and shutdown events using context managers (such as `@asynccontextmanager`):\n\n```python\n    async def lifespan(self, scope: Scope, receive: Receive, send: Send) -> None:\n        started = False\n        app: Any = scope.get(\"app\")\n        await receive() # Wait for lifespan.startup message\n        try:\n            async with self.lifespan_context(app) as maybe_state:\n                if maybe_state is not None:\n                    scope[\"state\"].update(maybe_state)\n                await send({\"type\": \"lifespan.startup.complete\"})\n                started = True\n                await receive() # Wait for lifespan.shutdown message\n        except BaseException:\n            exc_text = traceback.format_exc()\n            if started:\n                await send({\"type\": \"lifespan.shutdown.failed\", \"message\": exc_text})\n            else:\n                await send({\"type\": \"lifespan.startup.failed\", \"message\": exc_text})\n            raise\n        else:\n            await send({\"type\": \"lifespan.shutdown.complete\"})\n```\n\n#### B. HTTP & WebSocket Request Lifecycle (`scope[\"type\"] == \"http\"` or `\"websocket\"`)\n1. **Route Matching**: The router iterates over `self.routes` (instances of `Route`, `WebSocketRoute`, or `Mount`) checking `route.matches(scope)`.\n2. **Execution Hand-off**: When a full match (`Match.FULL`) is found, `scope.update(child_scope)` updates path parameters and child scopes, and control is handed over to **`route.handle(scope, receive, send)`**.\n3. **Endpoint Invocation**: The specific route handles the request, instantiating `Request` or `WebSocket` abstractions and invoking the user-defined endpoint callable.\n4. **Fallback (`self.default`)**: If no route matches, execution falls back to `Router.not_found` (returning a `404 Not Found` response or raising an `HTTPException` if running inside a Starlette application)."
+    },
+    {
+      "arm": "baseline",
+      "taskId": "q3_exceptions",
+      "question": "How are HTTP and WebSocket errors / exceptions caught and handled in Starlette?",
+      "turns": 8,
+      "promptTokens": 15279,
+      "completionTokens": 1345,
+      "totalTokens": 16624,
+      "toolContextTokens": 3046,
+      "costUSD": 0.0015494249999999999,
+      "durationMs": 42509,
+      "toolCallsCount": {
+        "list_dir": 2,
+        "grep": 2,
+        "read_file": 3
+      },
+      "keyFactCoverage": 75,
+      "grades": [
+        {
+          "factId": "q3_fact_1",
+          "fact": "ExceptionMiddleware catches downstream exceptions and maps them against registered exception_handlers dictionary",
+          "verdict": "COVERED",
+          "score": 1,
+          "citation": "\"In Starlette, HTTP and WebSocket errors and exceptions are caught and handled primarily via **`ExceptionMiddleware`** in combination with the exception wrapping...\""
+        },
+        {
+          "factId": "q3_fact_2",
+          "fact": "HTTPException carries status_code and detail and produces structured HTTP error responses",
+          "verdict": "COVERED",
+          "score": 1,
+          "citation": "\"It accepts a `status_code`, an optional `detail` string, and optional `headers`...\""
+        },
+        {
+          "factId": "q3_fact_3",
+          "fact": "ServerErrorMiddleware acts as outer safety net for unhandled 500 server errors",
+          "verdict": "PARTIAL",
+          "score": 0.5,
+          "citation": "\"* **`self._status_handlers`** (mapping integer HTTP status codes like `404` or `500` to handler functions)...\""
+        },
+        {
+          "factId": "q3_fact_4",
+          "fact": "WebSocket disconnects and exceptions are surfaced as WebSocketDisconnect with closure status codes",
+          "verdict": "PARTIAL",
+          "score": 0.5,
+          "citation": "\"It accepts a `status_code`, an optional `detail` string, and optional `headers`...\""
+        }
+      ],
+      "finalAnswer": "In Starlette, HTTP and WebSocket errors and exceptions are caught and handled primarily via **`ExceptionMiddleware`** in combination with the exception wrapping logic defined in **`starlette._exception_handler.py`**.\n\nHere is a detailed breakdown of the exact mechanisms, classes, files, and flow involved.\n\n---\n\n### 1. Key Classes and Files\n\n* **`starlette.exceptions.HTTPException`**: \n  The standard exception raised for HTTP error responses (e.g., `404 Not Found`, `400 Bad Request`). It accepts a `status_code`, an optional `detail` string, and optional `headers`.\n* **`starlette.exceptions.WebSocketException`**: \n  The standard exception raised inside WebSocket connections/endpoints when closing with a specific WebSocket close code and optional reason (e.g., `code=1008`, `reason=\"Policy Violation\"`).\n* **`starlette.middleware.exceptions.ExceptionMiddleware`**: \n  The core ASGI middleware responsible for setting up exception mapping, instantiating request/websocket connection wrappers, and handling exceptions raised during ASGI application execution.\n* **`starlette._exception_handler.wrap_app_handling_exceptions`**: \n  A helper function (located in `starlette/_exception_handler.py`) that wraps the downstream ASGI application call, catches raised exceptions, performs exception/status code lookups, invokes the appropriate handler, and renders/sends the resulting response.\n\n---\n\n### 2. How `ExceptionMiddleware` Sets Up Exception Handling\n\nWhen a Starlette application is initialized (or when `ExceptionMiddleware` is added explicitly), `ExceptionMiddleware.__init__` registers default exception handlers:\n* `HTTPException` maps to `self.http_exception`\n* `WebSocketException` maps to `self.websocket_exception`\n\nCustom handlers can be registered via `add_exception_handler(exc_class_or_status_code, handler)`, which populates either:\n* **`self._exception_handlers`** (mapping exception classes to handler functions using Method Resolution Order / MRO lookup).\n* **`self._status_handlers`** (mapping integer HTTP status codes like `404` or `500` to handler functions).\n\n---\n\n### 3. The ASGI Lifecycle & Exception Catching Mechanism\n\nWhen an incoming ASGI request or WebSocket connection hits `ExceptionMiddleware.__call__` (`starlette/middleware/exceptions.py`), the following sequence occurs:\n\n1. **Scope Filtering:** \n   If `scope[\"type\"]` is neither `\"http\"` nor `\"websocket\"`, it bypasses exception handling and calls `self.app(scope, receive, send)` directly.\n2. **Injecting Exception Handlers into Scope:** \n   The middleware injects its exception handlers into the ASGI `scope`:\n   ```python\n   scope[\"starlette.exception_handlers\"] = (\n       self._exception_handlers,\n       self._status_handlers,\n   )\n   ```\n3. **Connection Context Creation:** \n   It wraps the scope/receive/send into either a `Request` or a `WebSocket` instance (`conn`).\n4. **Wrapping the App:** \n   It calls `wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)`.\n\n---\n\n### 4. Inside `wrap_app_handling_exceptions` (`starlette/_exception_handler.py`)\n\nThe wrapped application function intercepts exceptions using standard Python `try...except` blocks during the ASGI lifecycle:\n\n1. **Tracking Response State:** \n   A custom `sender` wrapper monitors whether `http.response.start` has been sent (`response_started = True`).\n2. **Calling Downstream Apps:** \n   It awaits `await app(scope, receive, sender)`.\n3. **Catching Exceptions:** \n   If an `Exception` (or subclass like `HTTPException` or `WebSocketException`) is raised from routing, middleware, or endpoints:\n   * **Status Code Lookup:** If the exception is an `HTTPException`, Starlette first checks `status_handlers` for a handler matching `exc.status_code`.\n   * **Exception Class Lookup (`_lookup_exception_handler`):** If no status code handler is found (or it isn't an `HTTPException`), it walks up the exception's class MRO (`type(exc).__mro__`) to find a matching registered exception handler in `exception_handlers`.\n   * **Unhandled Exceptions:** If no matching handler is found, the exception is re-raised (`raise exc`).\n4. **Checking Response State:** \n   If a handler is found but `response_started` is already `True`, Starlette raises a `RuntimeError(\"Caught handled exception, but response already started.\")` because HTTP headers have already been transmitted to the client.\n5. **Executing the Handler:** \n   * It checks if the handler is an asynchronous callable (`is_async_callable(handler)`).\n   * If synchronous, it runs the handler safely in a threadpool (`run_in_threadpool(handler, conn, exc)`).\n   * If asynchronous, it awaits `await handler(conn, exc)`.\n6. **Sending the Response:** \n   If the handler returns a `Response` object, Starlette awaits the response (`await response(scope, receive, sender)`), which sends the generated error response (e.g., custom HTML, JSON, or plain text) back through the ASGI server."
+    },
+    {
+      "arm": "baseline",
+      "taskId": "q1_authentication",
+      "question": "How does authentication and credential validation work across HTTP requests and WebSockets in Starlette?",
+      "turns": 8,
+      "promptTokens": 16619,
+      "completionTokens": 1599,
+      "totalTokens": 18218,
+      "toolContextTokens": 3365,
+      "costUSD": 0.001726125,
+      "durationMs": 53366,
+      "toolCallsCount": {
+        "list_dir": 3,
+        "read_file": 3,
+        "grep": 1
+      },
+      "keyFactCoverage": 90,
+      "grades": [
+        {
+          "factId": "q1_fact_1",
+          "fact": "AuthenticationBackend provides abstract authenticate(conn) method returning (AuthCredentials, BaseUser) tuple",
+          "verdict": "COVERED",
+          "score": 1,
+          "citation": "\"* **`AuthenticationBackend`**: Subclasses must implement the coroutine `authenticate(self, conn: HTTPConnection) -> tuple[AuthCredentials, BaseUser] | None`...\""
+        },
+        {
+          "factId": "q1_fact_2",
+          "fact": "AuthenticationMiddleware intercepts ASGI connection and populates conn.scope['auth'] and conn.scope['user']",
+          "verdict": "COVERED",
+          "score": 1,
+          "citation": "\"**Populating the Scope:** If `auth_result` is returned successfully, it injects the tuple of `(AuthCredentials, BaseUser)` into `scope[\"auth\"]` and `scope[\"user...\""
+        },
+        {
+          "factId": "q1_fact_3",
+          "fact": "Unauthenticated requests fall back to UnauthenticatedUser and empty AuthCredentials()",
+          "verdict": "COVERED",
+          "score": 1,
+          "citation": "\"If `auth_result` is `None`, it defaults to an empty `AuthCredentials()` and an `UnauthenticatedUser()`:...\""
+        },
+        {
+          "factId": "q1_fact_4",
+          "fact": "requires(scopes) decorator checks has_required_scope and raises AuthenticationError or HTTPException 403 on missing permissions",
+          "verdict": "COVERED",
+          "score": 1,
+          "citation": "\"**Error Handling:** If an `AuthenticationError` is raised during credential validation:...\""
+        },
+        {
+          "factId": "q1_fact_5",
+          "fact": "Default authentication error handler returns PlainTextResponse with HTTP 400 Bad Request status",
+          "verdict": "PARTIAL",
+          "score": 0.5,
+          "citation": "\"* For **HTTP requests**, it returns the response generated by `on_error` (defaulting to a `PlainTextResponse` with status code `400`)...\""
+        }
+      ],
+      "finalAnswer": "In Starlette, authentication and credential validation are unified across both **HTTP requests** and **WebSockets** via the ASGI connection abstraction (`HTTPConnection`), custom authentication backends, middleware, and decorators. \n\nBecause Starlette applications conform to the ASGI specification, HTTP requests and WebSockets share a common underlying dictionary structure called the **`scope`** (`starlette.types.Scope`), which represents the connection lifecycle and metadata.\n\n---\n\n### 1. The Core Abstraction: `HTTPConnection`\nBoth `Request` (for HTTP) and `WebSocket` inherit from **`HTTPConnection`** (`starlette.requests.HTTPConnection`). This ensures that properties used for accessing credentials—such as `.auth` and `.user`—operate identically across both HTTP and WebSocket connections.\n\n* **`HTTPConnection`** reads directly from the ASGI `scope`:\n  * `conn.auth` returns `self.scope[\"auth\"]` (asserting that `\"auth\"` is present).\n  * `conn.user` returns `self.scope[\"user\"]` (asserting that `\"user\"` is present).\n\n---\n\n### 2. Credential Validation & Population: `AuthenticationMiddleware`\nCredential extraction and validation are typically handled globally (or per route group) by **`AuthenticationMiddleware`** (`starlette.middleware.authentication.AuthenticationMiddleware`).\n\n#### The ASGI Lifecycle Mechanism (`__call__`):\n1. **Scope Filtering:** When an ASGI request or WebSocket connection enters the middleware, it checks `scope[\"type\"]`. If the type is neither `\"http\"` nor `\"websocket\"` (e.g., lifespan events), it passes the call directly to the next application without processing.\n   * Defined in `starlette/middleware/authentication.py`:\n     ```python\n     if scope[\"type\"] not in [\"http\", \"websocket\"]:\n         await self.app(scope, receive, send)\n         return\n     ```\n2. **Connection Wrapper:** It wraps the ASGI scope into an `HTTPConnection` object:\n   ```python\n   conn = HTTPConnection(scope)\n   ```\n3. **Backend Authentication Call:** It awaits the configured authentication backend's `.authenticate(conn)` method asynchronously:\n   ```python\n   auth_result = await self.backend.authenticate(conn)\n   ```\n4. **Error Handling:** If an `AuthenticationError` is raised during credential validation:\n   * It invokes `self.on_error(conn, exc)`.\n   * For **WebSockets**, it sends a `websocket.close` ASGI event (`{\"type\": \"websocket.close\", \"code\": 1000}`).\n   * For **HTTP requests**, it returns the response generated by `on_error` (defaulting to a `PlainTextResponse` with status code `400`).\n5. **Populating the Scope:** If `auth_result` is returned successfully, it injects the tuple of `(AuthCredentials, BaseUser)` into `scope[\"auth\"]` and `scope[\"user\"]`. If `auth_result` is `None`, it defaults to an empty `AuthCredentials()` and an `UnauthenticatedUser()`:\n   ```python\n   if auth_result is None:\n       auth_result = AuthCredentials(), UnauthenticatedUser()\n   scope[\"auth\"], scope[\"user\"] = auth_result\n   await self.app(scope, receive, send)\n   ```\n\n---\n\n### 3. Implementing Backends, Credentials, and Users (`starlette.authentication`)\nStarlette provides abstract base classes and standard implementations in `starlette/authentication.py`:\n\n* **`AuthenticationBackend`**: Subclasses must implement the coroutine `authenticate(self, conn: HTTPConnection) -> tuple[AuthCredentials, BaseUser] | None`.\n* **`AuthCredentials`**: Encapsulates a sequence of authorization scopes:\n  ```python\n  class AuthCredentials:\n      def __init__(self, scopes: Sequence[str] | None = None):\n          self.scopes = [] if scopes is None else list(scopes)\n  ```\n* **`BaseUser` / `SimpleUser` / `UnauthenticatedUser`**: Represent the user entity. `SimpleUser` returns `True` for `.is_authenticated`, whereas `UnauthenticatedUser` returns `False`.\n\n---\n\n### 4. Route/Endpoint Authorization: The `@requires` Decorator\nOnce credentials are populated into `scope` via middleware, individual endpoint functions (HTTP route handlers or WebSocket endpoints) can enforce access control using the **`@requires`** decorator (`starlette.authentication.requires`).\n\nThe decorator inspects function signatures to differentiate between HTTP handlers (`request`) and WebSocket handlers (`websocket`):\n\n#### HTTP Request Enforcement:\n* If the user/connection lacks required scopes (`has_required_scope`), it either:\n  * Redirects to a login page if a `redirect` route name is specified (using a `303 See Other` `RedirectResponse` with a `?next=` query parameter).\n  * Raises an `HTTPException` (defaulting to status code `403 Forbidden`).\n\n#### WebSocket Connection Enforcement:\n* If a WebSocket handler fails scope validation, `@requires` intercepts the call, **closes the WebSocket connection directly**, and avoids calling the underlying function:\n  ```python\n  if type_ == \"websocket\":\n      @functools.wraps(func)\n      async def websocket_wrapper(*args: _P.args, **kwargs: _P.kwargs) -> None:\n          websocket = kwargs.get(\"websocket\", args[idx] if idx < len(args) else None)\n          assert isinstance(websocket, WebSocket), ...\n\n          if not has_required_scope(websocket, scopes_list):\n              await websocket.close()\n          else:\n              await func(*args, **kwargs)\n      return websocket_wrapper\n  ```\n\n---\n\n### Summary Summary Table of Mechanisms\n\n| Feature | HTTP Requests (`Request`) | WebSockets (`WebSocket`) |\n| :--- | :--- | :--- |\n| **Connection Abstraction** | Inherits from `HTTPConnection` | Inherits from `HTTPConnection` |\n| **Scope Keys** | `scope[\"auth\"]`, `scope[\"user\"]` | `scope[\"auth\"]`, `scope[\"user\"]` |\n| **Middleware Handling** | `AuthenticationMiddleware` (calls `response(scope, receive, send)` on error) | `AuthenticationMiddleware` (calls `send({\"type\": \"websocket.close\", ...})` on error) |\n| **Permission Check Decorator** | `@requires` (raises `HTTPException` or issues `RedirectResponse`) | `@requires` (calls `await websocket.close()`) |"
+    }
+  ],
+  "graphify": [
+    {
+      "arm": "graphify",
+      "taskId": "q6_blast_radius",
+      "question": "What is the blast radius and architectural impact of modifying the middleware pipeline in Starlette?",
+      "turns": 8,
+      "promptTokens": 31382,
+      "completionTokens": 1525,
+      "totalTokens": 32907,
+      "toolContextTokens": 4687,
+      "costUSD": 0.00281115,
+      "durationMs": 44080,
+      "toolCallsCount": {
+        "query_graph": 1,
+        "grep": 4,
+        "read_file": 2
+      },
+      "keyFactCoverage": 87.5,
+      "grades": [
+        {
+          "factId": "q6_fact_1",
+          "fact": "Middleware class encapsulates middleware class and kwargs instantiated during Starlette.build_middleware_stack()",
+          "verdict": "COVERED",
+          "score": 1,
+          "citation": "\"* **The Middleware Stack Definition**: The middleware stack is built via `build_middleware_stack()`...\""
+        },
+        {
+          "factId": "q6_fact_2",
+          "fact": "BaseHTTPMiddleware provides dispatch(request, call_next) abstraction for custom request interceptors",
+          "verdict": "COVERED",
+          "score": 1,
+          "citation": "\"`BaseHTTPMiddleware` (`starlette/middleware/base.py`) provides a higher-level `dispatch(request, call_next)` abstraction...\""
+        },
+        {
+          "factId": "q6_fact_3",
+          "fact": "Pipeline modification directly impacts Core middlewares: ServerErrorMiddleware, ExceptionMiddleware, AuthenticationMiddleware",
+          "verdict": "PARTIAL",
+          "score": 0.5,
+          "citation": "\"**`ServerErrorMiddleware`** (`starlette/middleware/errors.py`): Added as the **outermost** layer to catch uncaught 500 server errors and format debugging/produc...\""
+        },
+        {
+          "factId": "q6_fact_4",
+          "fact": "Affects all downstream ASGI endpoints by altering request wrapping, header mutation, and exception bubbling",
+          "verdict": "COVERED",
+          "score": 1,
+          "citation": "\"* **Innermost layers** (e.g., `ExceptionMiddleware`) see the request *last* (just before routing) and the response *first* (as it comes out of the router/endpoi...\""
+        }
+      ],
+      "finalAnswer": "Modifying the middleware pipeline in Starlette carries a **high architectural blast radius** because middleware sits at the core of Starlette's request-response lifecycle and execution flow. In Starlette, the middleware pipeline is not just an optional add-on; it forms the foundational wrapper around the entire ASGI application and routing layers.\n\nBelow is a detailed technical analysis of the blast radius, components involved, and architectural impact of modifying the Starlette middleware pipeline.\n\n---\n\n### 1. Architectural Role & Execution Mechanics\n\nStarlette applications (`Starlette` class in `starlette/applications.py`) implement the ASGI protocol via `__call__(scope, receive, send)`. \n\n* **The Middleware Stack Definition**: The middleware stack is built via `build_middleware_stack()`. Starlette automatically inserts mandatory built-in middlewares around user-defined middleware in a precise onion-like layering order:\n  1. **`ServerErrorMiddleware`** (`starlette/middleware/errors.py`): Added as the **outermost** layer to catch uncaught 500 server errors and format debugging/production error responses.\n  2. **`RequestBodyLimitMiddleware`** (`starlette/middleware/body_limit.py`): Enforces `max_body_size` bounds on incoming HTTP requests.\n  3. **User-defined Middlewares**: Supplied via `middleware: Sequence[Middleware]` or `.add_middleware()`, wrapped in the order they are defined.\n  4. **`ExceptionMiddleware`** (`starlette/middleware/exceptions.py`): Added as the **innermost** layer right outside the router to handle standard HTTP exceptions and status code overrides.\n  5. **`Router`** (`starlette/routing.py`): The core ASGI app endpoint handling routing, endpoints, and background tasks.\n\n* **Reversal and Wrapping**: During `build_middleware_stack()`, middleware is instantiated by iterating over `reversed(middleware)`. Each middleware class wraps the downstream ASGI application (`app = cls(app, *args, **kwargs)`), returning a composite ASGI callable (`self.middleware_stack`).\n\n---\n\n### 2. Blast Radius of Pipeline Modifications\n\nModifying how middlewares are stored, built, or executed affects several broad areas of the framework:\n\n#### A. Order-Dependent Behavior (The \"Onion\" Effect)\nBecause middlewares wrap one another as standard ASGI callables (`async def __call__(scope, receive, send)`), changing the wrapping order or how layers are composed alters the execution sequence:\n* **Outermost layers** (e.g., `ServerErrorMiddleware`) see the request *first* and the response *last*.\n* **Innermost layers** (e.g., `ExceptionMiddleware`) see the request *last* (just before routing) and the response *first* (as it comes out of the router/endpoints).\n* **Impact**: Altering pipeline construction logic can inadvertently cause security headers (like `TrustedHostMiddleware` or `CORSMiddleware`) or exception handlers to execute *after* response headers have already been sent down the wire via `send`.\n\n#### B. ASGI Protocol Compliance & Lifecycle Hooks\nEvery middleware in Starlette must adhere strictly to the ASGI spec (`scope`, `receive`, `send`). Modifications to the pipeline signature or handling of non-HTTP scopes (such as **WebLifespan** or **WebSockets**) risk breaking connection handling:\n* **Lifespan Events**: Lifespan startup/shutdown messages (`lifespan.startup`, `lifespan.shutdown`) pass through the middleware stack. Certain middlewares ignore non-http/websocket scopes, but a broken pipeline implementation can swallow or misroute lifespan events, preventing the application from starting or shutting down cleanly.\n* **WebSockets**: Middlewares like `BaseHTTPMiddleware` are explicitly designed for HTTP and cannot process WebSocket lifecycles (`http.request` vs `websocket.connect`), leading to runtime errors if middleware pipeline assumptions fail to filter by `scope[\"type\"]`.\n\n#### C. Request/Response Body Consumption (`BaseHTTPMiddleware`)\n`BaseHTTPMiddleware` (`starlette/middleware/base.py`) provides a higher-level `dispatch(request, call_next)` abstraction. Under the hood, it buffers request bodies and translates streams into cached requests (`_CachedRequest`) and streaming responses (`_StreamingResponse`).\n* **Impact**: Changes to the core middleware execution sequence directly impact `BaseHTTPMiddleware`. If the pipeline fails to propagate `receive`/`send` correctly, request streaming, client disconnect handling (`asyncio.CancelledError`), and background task execution (which run *after* the response has been sent) can hang or leak resources.\n\n#### D. Application State & Immutable Constraints\nStarlette enforces strict constraints on middleware mutations:\n* `add_middleware()` raises a `RuntimeError` (`\"Cannot add middleware after an application has started\"`) once `self.middleware_stack` is built. Any pipeline modification that breaks this immutability check can lead to race conditions in multi-threaded or multi-worker ASGI servers (like Uvicorn/Hypercorn) where `__call__` has already been invoked.\n\n---\n\n### 3. Key Symbols & Files Involved\n\n| Component / Symbol | File Path | Architectural Responsibility |\n| :--- | :--- | :--- |\n| `Middleware` | `starlette/middleware/__init__.py` | Data container holding middleware class, `*args`, and `**kwargs`. |\n| `Starlette` | `starlette/applications.py` | Manages `user_middleware`, `middleware_stack`, and triggers `build_middleware_stack()`. |\n| `ServerErrorMiddleware` | `starlette/middleware/errors.py` | Outermost error-capturing and debugging middleware layer. |\n| `ExceptionMiddleware` | `starlette/middleware/exceptions.py` | Innermost exception-handling middleware layer (status codes & exception handlers). |\n| `RequestBodyLimitMiddleware` | `starlette/middleware/body_limit.py` | Guards against request body payload exhaustion/abuse. |\n| `BaseHTTPMiddleware` | `starlette/middleware/base.py` | Provides helper dispatch semantics (`call_next`), handling request body caching and background tasks. |\n| `Router` / `BaseRoute` | `starlette/routing.py` | The core ASGI application endpoint downstream of the middleware stack. |"
+    },
+    {
+      "arm": "graphify",
+      "taskId": "q2_asgi_dispatch",
+      "question": "What is the main entry point and ASGI lifecycle dispatch for Starlette applications?",
+      "turns": 8,
+      "promptTokens": 31675,
+      "completionTokens": 1208,
+      "totalTokens": 32883,
+      "toolContextTokens": 5753,
+      "costUSD": 0.0027380250000000003,
+      "durationMs": 42490,
+      "toolCallsCount": {
+        "query_graph": 2,
+        "grep": 2,
+        "list_dir": 1,
+        "read_file": 2
+      },
+      "keyFactCoverage": 100,
+      "grades": [
+        {
+          "factId": "q2_fact_1",
+          "fact": "Starlette class is ASGI3 application implementing async def __call__(scope, receive, send)",
+          "verdict": "COVERED",
+          "score": 1,
+          "citation": "\"When an ASGI server (such as Uvicorn or Hypercorn) launches a Starlette application, it interacts with the application instance as an ASGI application callable ...\""
+        },
+        {
+          "factId": "q2_fact_2",
+          "fact": "Dispatch branches by scope['type'] handling 'http', 'websocket', and 'lifespan' events",
+          "verdict": "COVERED",
+          "score": 1,
+          "citation": "\"Once execution passes through the middleware stack, it reaches the core `Router` instance (`starlette/routing.py`), which handles both **Lifespan** events (`lif...\""
+        },
+        {
+          "factId": "q2_fact_3",
+          "fact": "Lifespan events manage startup and shutdown state via Lifespan or Router.lifespan context handlers",
+          "verdict": "COVERED",
+          "score": 1,
+          "citation": "\"If `scope[\"type\"] == \"lifespan\"`, Starlette handles startup and shutdown hooks/async context managers via `self.lifespan` (managed via `Router.lifespan` in `sta...\""
+        },
+        {
+          "factId": "q2_fact_4",
+          "fact": "build_middleware_stack() constructs nested ASGI callable chain wrapping Router with user and default middlewares in reverse order",
+          "verdict": "COVERED",
+          "score": 1,
+          "citation": "\"In Starlette, the main entry point and ASGI lifecycle dispatch for applications revolve around the `Starlette` class, its middleware stack, and its underlying `...\""
+        },
+        {
+          "factId": "q2_fact_5",
+          "fact": "Uncaught exceptions during dispatch are caught by ServerErrorMiddleware and ExceptionMiddleware",
+          "verdict": "COVERED",
+          "score": 1,
+          "citation": "\"* **`ServerErrorMiddleware`** (`starlette/middleware/errors.py`): Placed as the outermost layer to catch any unhandled server exceptions (HTTP 500 or general ex...\""
+        }
+      ],
+      "finalAnswer": "In Starlette, the main entry point and ASGI lifecycle dispatch for applications revolve around the `Starlette` class, its middleware stack, and its underlying `Router`. \n\nHere is the detailed breakdown of the main entry point and ASGI lifecycle dispatch mechanisms, citing the exact files and symbols:\n\n---\n\n### 1. Main Entry Point: `Starlette.__call__`\nWhen an ASGI server (such as Uvicorn or Hypercorn) launches a Starlette application, it interacts with the application instance as an ASGI application callable conforming to the ASGI spec: `async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None`.\n\n* **File:** `starlette/applications.py`\n* **Class & Method:** `Starlette.__call__` (Line 92)\n\n```python\nasync def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:\n    scope[\"app\"] = self\n    if self.middleware_stack is None:\n        self.middleware_stack = self.build_middleware_stack()\n    await self.middleware_stack(scope, receive, send)\n```\n\nUpon invocation:\n1. It injects the application instance into `scope[\"app\"]`.\n2. It lazily builds or retrieves the application's **middleware stack** via `self.build_middleware_stack()`.\n3. It dispatches the ASGI `scope`, `receive`, and `send` directly into the outermost middleware/ASGI app in the stack.\n\n---\n\n### 2. Middleware Stack Composition: `Starlette.build_middleware_stack`\nThe middleware stack acts as the onion layer wrapping around the core routing/dispatch logic. \n\n* **File:** `starlette/applications.py`\n* **Method:** `Starlette.build_middleware_stack` (Line 63)\n\nBy default, Starlette automatically inserts critical middleware layers around the user's custom middleware and router (`self.router`):\n* **`ServerErrorMiddleware`** (`starlette/middleware/errors.py`): Placed as the outermost layer to catch any unhandled server exceptions (HTTP 500 or general exceptions) across the entire application stack.\n* **`RequestBodyLimitMiddleware`** (`starlette/middleware/body_limit.py`): Optional body-size limiting middleware (if `max_body_size` is configured).\n* **User-defined middleware**: Added in the order specified during application setup.\n* **`ExceptionMiddleware`** (`starlette/middleware/exceptions.py`): Placed as the innermost layer just above the router to handle custom exception handlers and `HTTPException` responses raised during routing or endpoint execution.\n\n---\n\n### 3. ASGI Lifecycle & Request Routing Dispatch: `Router.__call__`\nOnce execution passes through the middleware stack, it reaches the core `Router` instance (`starlette/routing.py`), which handles both **Lifespan** events (`lifespan` scope) and request dispatching (`http` and `websocket` scopes).\n\n* **File:** `starlette/routing.py`\n* **Class & Method:** `Router.__call__` (Line 715)\n\n```python\nasync def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:\n    assert scope[\"type\"] in (\"http\", \"websocket\", \"lifespan\")\n\n    if self.redirect_slashes:\n        ...\n        \n    if scope[\"type\"] == \"lifespan\":\n        await self.lifespan(scope, receive, send)\n        return\n\n    # Match routes and dispatch request\n    ...\n```\n\n#### A. Lifespan Dispatch (`lifespan` scope)\nIf `scope[\"type\"] == \"lifespan\"`, Starlette handles startup and shutdown hooks/async context managers via `self.lifespan` (managed via `Router.lifespan` in `starlette/routing.py`), allowing application startup tasks (like DB connections) and shutdown tasks to execute safely.\n\n#### B. HTTP and WebSocket Dispatch (`http` or `websocket` scope)\n1. **Route Matching:** The router iterates through its registered routes (`self.routes`, containing `Route`, `WebSocketRoute`, `Mount`, or `Host` instances) to find a match against the incoming request path/host.\n2. **Endpoint Invocation:** Once a matching route is found:\n   * For HTTP routes, helper wrappers like `request_response()` (`starlette/routing.py`) execute endpoint callables, handling background tasks, dependencies, and returning standard `Response` objects back through ASGI `send`/`receive` channels.\n   * For WebSockets, `websocket_session()` handles handshakes and WebSocket lifecycles."
+    },
+    {
+      "arm": "graphify",
+      "taskId": "q3_exceptions",
+      "question": "How are HTTP and WebSocket errors / exceptions caught and handled in Starlette?",
+      "turns": 8,
+      "promptTokens": 31390,
+      "completionTokens": 1156,
+      "totalTokens": 32546,
+      "toolContextTokens": 4506,
+      "costUSD": 0.00270105,
+      "durationMs": 42568,
+      "toolCallsCount": {
+        "query_graph": 1,
+        "grep": 2,
+        "read_file": 3,
+        "list_dir": 1
+      },
+      "keyFactCoverage": 75,
+      "grades": [
+        {
+          "factId": "q3_fact_1",
+          "fact": "ExceptionMiddleware catches downstream exceptions and maps them against registered exception_handlers dictionary",
+          "verdict": "COVERED",
+          "score": 1,
+          "citation": "\"In Starlette, HTTP and WebSocket errors and exceptions are caught, intercepted, and handled via a combination of custom exception classes, an exception-handling...\""
+        },
+        {
+          "factId": "q3_fact_2",
+          "fact": "HTTPException carries status_code and detail and produces structured HTTP error responses",
+          "verdict": "COVERED",
+          "score": 1,
+          "citation": "\"* `HTTPException`: Handled by `self.http_exception`, which wraps the detail message in a `PlainTextResponse` (or empty `Response` for status codes like `204` or...\""
+        },
+        {
+          "factId": "q3_fact_3",
+          "fact": "ServerErrorMiddleware acts as outer safety net for unhandled 500 server errors",
+          "verdict": "PARTIAL",
+          "score": 0.5,
+          "citation": "\"* **Status-code specific handlers**: If the exception is an `HTTPException`, it first looks for a handler matching the specific `exc.status_code` in `status_han...\""
+        },
+        {
+          "factId": "q3_fact_4",
+          "fact": "WebSocket disconnects and exceptions are surfaced as WebSocketDisconnect with closure status codes",
+          "verdict": "PARTIAL",
+          "score": 0.5,
+          "citation": "\"* `status_code` (`int`)...\""
+        }
+      ],
+      "finalAnswer": "In Starlette, HTTP and WebSocket errors and exceptions are caught, intercepted, and handled via a combination of custom exception classes, an exception-handling middleware (`ExceptionMiddleware`), and low-level ASGI exception-wrapping utilities (`wrap_app_handling_exceptions`).\n\n---\n\n### 1. Core Exception Classes (`starlette/exceptions.py`)\n\nStarlette defines two standard exception types to represent protocol-specific error conditions:\n\n* **`HTTPException`**: Raised during HTTP requests (e.g., inside routing, dependencies, or endpoints). It accepts:\n  * `status_code` (`int`)\n  * `detail` (`str | None`, defaults to the standard HTTP phrase mapping via `http.client.responses`)\n  * `headers` (`Mapping[str, str] | None`)\n* **`WebSocketException`**: Raised during WebSocket connections (e.g., when a handshake or authentication fails before or during connection acceptance). It accepts:\n  * `code` (`int`, corresponding to WebSocket close codes such as 1008 Policy Violation or 4000+ custom codes)\n  * `reason` (`str | None`)\n\n---\n\n### 2. Exception Handling Middleware & ASGI Wrapper (`starlette/middleware/exceptions.py` & `starlette/_exception_handler.py`)\n\n#### `ExceptionMiddleware` (`starlette/middleware/exceptions.py`)\n`ExceptionMiddleware` is the primary middleware responsible for adding exception-handling behavior to a Starlette application. \n\n1. **Scope Enrichment**: When an incoming ASGI request or WebSocket connection hits `ExceptionMiddleware.__call__`, it checks if `scope[\"type\"]` is `\"http\"` or `\"websocket\"`. If so, it injects custom exception handlers into the ASGI scope:\n   ```python\n   scope[\"starlette.exception_handlers\"] = (\n       self._exception_handlers,\n       self._status_handlers,\n   )\n   ```\n2. **Default Handlers**: By default, `ExceptionMiddleware` registers handlers for:\n   * `HTTPException`: Handled by `self.http_exception`, which wraps the detail message in a `PlainTextResponse` (or empty `Response` for status codes like `204` or `304`) and preserves custom `headers`.\n   * `WebSocketException`: Handled by `self.websocket_exception`, which safely closes the WebSocket connection using `await websocket.close(code=exc.code, reason=exc.reason)`.\n\n#### `wrap_app_handling_exceptions` (`starlette/_exception_handler.py`)\nThe actual `try...except` exception interception loop is delegated to `wrap_app_handling_exceptions`, which wraps the inner ASGI application:\n\n1. **Execution**: It awaits the inner `app(scope, receive, sender)` inside a `try...except Exception as exc` block. A custom `sender` wrapper monitors if `http.response.start` has already been sent (`response_started = True`).\n2. **Lookup Strategy**: If an exception occurs:\n   * **Status-code specific handlers**: If the exception is an `HTTPException`, it first looks for a handler matching the specific `exc.status_code` in `status_handlers` (e.g., a custom handler for `404` or `500`).\n   * **Exception-class MRO lookup**: If no status-specific handler is found (or if it's a general exception or `WebSocketException`), it traverses the exception class's Method Resolution Order (`type(exc).__mro__`) using `_lookup_exception_handler` to find a matching exception type handler.\n   * **Uncaught Exceptions**: If no matching handler is found, the exception is re-raised (`raise exc`) to bubble up to the ASGI server (e.g., Uvicorn).\n3. **Response State Check**: If a handler is found but `response_started` is `True`, Starlette raises a `RuntimeError(\"Caught handled exception, but response already started.\")` because headers/status have already been transmitted to the client.\n4. **Invocation & Dispatch**: \n   * Handlers can be synchronous or asynchronous (checked via `is_async_callable(handler)` and executed via `run_in_threadpool` if synchronous).\n   * The handler receives the connection instance (`Request` or `WebSocket`) and the exception (`exc`).\n   * If the handler returns a `Response` object (for HTTP), Starlette awaits and invokes `await response(scope, receive, sender)` to transmit the error response."
+    },
+    {
+      "arm": "graphify",
+      "taskId": "q1_authentication",
+      "question": "How does authentication and credential validation work across HTTP requests and WebSockets in Starlette?",
+      "turns": 8,
+      "promptTokens": 38734,
+      "completionTokens": 1528,
+      "totalTokens": 40262,
+      "toolContextTokens": 5360,
+      "costUSD": 0.00336345,
+      "durationMs": 52216,
+      "toolCallsCount": {
+        "query_graph": 1,
+        "read_file": 5,
+        "grep": 1
+      },
+      "keyFactCoverage": 80,
+      "grades": [
+        {
+          "factId": "q1_fact_1",
+          "fact": "AuthenticationBackend provides abstract authenticate(conn) method returning (AuthCredentials, BaseUser) tuple",
+          "verdict": "COVERED",
+          "score": 1,
+          "citation": "\"* **`AuthenticationBackend`** (`starlette/authentication.py`): An abstract interface that defines a single asynchronous method, `authenticate(self, conn: HTTPCo...\""
+        },
+        {
+          "factId": "q1_fact_2",
+          "fact": "AuthenticationMiddleware intercepts ASGI connection and populates conn.scope['auth'] and conn.scope['user']",
+          "verdict": "COVERED",
+          "score": 1,
+          "citation": "\"* **`AuthenticationMiddleware`** (`starlette/middleware/authentication.py`): The primary middleware component that intercepts incoming ASGI scopes where `scope[...\""
+        },
+        {
+          "factId": "q1_fact_3",
+          "fact": "Unauthenticated requests fall back to UnauthenticatedUser and empty AuthCredentials()",
+          "verdict": "COVERED",
+          "score": 1,
+          "citation": "\"* **No Credentials**: If the connection lacks credentials but is permitted anonymously, the backend returns `None`, which defaults to `(AuthCredentials(), Unaut...\""
+        },
+        {
+          "factId": "q1_fact_4",
+          "fact": "requires(scopes) decorator checks has_required_scope and raises AuthenticationError or HTTPException 403 on missing permissions",
+          "verdict": "COVERED",
+          "score": 1,
+          "citation": "\"* **`@requires` Decorator** (`starlette/authentication.py`): A decorator used on route handlers or endpoints to enforce scope/permission requirements, handling ...\""
+        },
+        {
+          "factId": "q1_fact_5",
+          "fact": "Default authentication error handler returns PlainTextResponse with HTTP 400 Bad Request status",
+          "verdict": "NOT_COVERED",
+          "score": 0,
+          "citation": "(no matching context found in answer)"
+        }
+      ],
+      "finalAnswer": "In Starlette, authentication and credential validation are handled uniformly across both HTTP requests and WebSockets via a combination of the ASGI middleware layer, connection abstractions, and decorator-based route guards. \n\nHere is a detailed breakdown of how authentication and credential validation work across HTTP requests and WebSockets:\n\n---\n\n### 1. The Core Components\n\n* **`AuthenticationMiddleware`** (`starlette/middleware/authentication.py`): The primary middleware component that intercepts incoming ASGI scopes where `scope[\"type\"]` is either `\"http\"` or `\"websocket\"`. It delegates credential extraction and validation to a user-provided authentication backend, then populates `scope[\"auth\"]` and `scope[\"user\"]`.\n* **`AuthenticationBackend`** (`starlette/authentication.py`): An abstract interface that defines a single asynchronous method, `authenticate(self, conn: HTTPConnection)`. Custom backends subclass this to inspect headers, cookies, or query parameters, validate credentials (e.g., tokens, database lookups), and return a tuple of `(AuthCredentials, BaseUser)`.\n* **`HTTPConnection`** (`starlette/requests.py`): A base class shared by both `Request` (HTTP) and `WebSocket` (WebSocket). It wraps the ASGI `scope` and provides properties (`.auth`, `.user`, `.headers`, `.cookies`, `.query_params`) to inspect incoming connection details.\n* **`AuthCredentials` & `BaseUser`** (`starlette/authentication.py`): \n  * `AuthCredentials` holds a list of granted scopes/permissions (`scopes: Sequence[str]`).\n  * `BaseUser` (and implementations like `SimpleUser` or `UnauthenticatedUser`) represents the authenticated identity, providing properties such as `is_authenticated`, `identity`, and `display_name`.\n* **`@requires` Decorator** (`starlette/authentication.py`): A decorator used on route handlers or endpoints to enforce scope/permission requirements, handling unauthorized HTTP requests via redirects or exceptions (`HTTPException`), and unauthorized WebSocket connections by closing the WebSocket socket.\n\n---\n\n### 2. Request Lifecycle & Credential Validation Flow\n\nWhen a client initiates either an HTTP request or a WebSocket handshake, the ASGI application executes the middleware stack:\n\n1. **Interception**: \n   `AuthenticationMiddleware.__call__` receives the ASGI `scope`, `receive`, and `send` callables (`starlette/middleware/authentication.py`, line 29). If `scope[\"type\"]` is neither `\"http\"` nor `\"websocket\"`, it bypasses authentication and calls the next application.\n2. **Connection Wrap**: \n   It wraps the ASGI `scope` in an `HTTPConnection(scope)` instance (`starlette/middleware/authentication.py`, line 34). Because `HTTPConnection` acts as a unified interface over both HTTP requests and WebSockets, the backend code does not need to distinguish between connection types to read headers or cookies.\n3. **Backend Authentication**: \n   It awaits the backend validation logic:\n   ```python\n   auth_result = await self.backend.authenticate(conn)\n   ```\n   * **Success**: If valid credentials are found, the backend returns a tuple `(AuthCredentials, BaseUser)`.\n   * **No Credentials**: If the connection lacks credentials but is permitted anonymously, the backend returns `None`, which defaults to `(AuthCredentials(), UnauthenticatedUser())` (`starlette/middleware/authentication.py`, line 46).\n   * **Failure**: If credential validation fails (e.g., token expired or invalid signature), the backend raises an `AuthenticationError`. The middleware catches this, invokes `self.on_error(conn, exc)`, and handles failure based on the connection type:\n     * **WebSocket**: Closes the WebSocket with code `1000` (`await send({\"type\": \"websocket.close\", \"code\": 1000})`).\n     * **HTTP**: Returns the error response via `response(scope, receive, send)`.\n4. **Scope Injection**: \n   Upon successful authentication, Starlette injects the results into the ASGI scope (`starlette/middleware/authentication.py`, line 47):\n   ```python\n   scope[\"auth\"], scope[\"user\"] = auth_result\n   ```\n5. **Downstream Access**: \n   Within route handlers, endpoints, or downstream middleware, `Request` and `WebSocket` objects inherit from `HTTPConnection`, exposing properties to retrieve the stored identity (`starlette/requests.py`, lines 180–187):\n   * `connection.user` (asserts `\"user\" in scope`)\n   * `connection.auth` (asserts `\"auth\" in scope`)\n\n---\n\n### 3. Enforcing Permissions via `@requires`\n\nOnce authentication populates `scope[\"user\"]` and `scope[\"auth\"]`, route-level credential validation is enforced using the `@requires` decorator (`starlette/authentication.py`, line 25).\n\nThe decorator automatically inspects the wrapped function signature for a parameter named `\"request\"` or `\"websocket\"` (`starlette/authentication.py`, line 37):\n\n* **For WebSockets (`type_ == \"websocket\"`):**\n  * Verifies if the websocket's credentials possess the required scopes via `has_required_scope(websocket, scopes_list)` (`starlette/authentication.py`, line 53).\n  * If validation fails, it immediately closes the WebSocket connection (`await websocket.close()`) without accepting or proceeding further into the handler (`starlette/authentication.py`, line 54).\n  * If valid, it executes the underlying websocket endpoint handler (`await func(*args, **kwargs)`).\n\n* **For HTTP Requests (`type_ == \"request\"`):**\n  * Checks required scopes against `request.auth.scopes`.\n  * If unauthorized, it either returns a `RedirectResponse` (if a `redirect` URL name is specified) or raises an `HTTPException` (defaulting to status code `403 Forbidden`, or a custom `status_code`) (`starlette/authentication.py`, lines 69–74)."
+    }
+  ],
+  "oss_analyser": [
+    {
+      "arm": "oss_analyser",
+      "taskId": "q6_blast_radius",
+      "question": "What is the blast radius and architectural impact of modifying the middleware pipeline in Starlette?",
+      "turns": 7,
+      "promptTokens": 20147,
+      "completionTokens": 1469,
+      "totalTokens": 21616,
+      "toolContextTokens": 3144,
+      "costUSD": 0.0019517249999999999,
+      "durationMs": 37729,
+      "toolCallsCount": {
+        "query_code_graph": 1,
+        "read_file": 2,
+        "grep": 3
+      },
+      "keyFactCoverage": 75,
+      "grades": [
+        {
+          "factId": "q6_fact_1",
+          "fact": "Middleware class encapsulates middleware class and kwargs instantiated during Starlette.build_middleware_stack()",
+          "verdict": "COVERED",
+          "score": 1,
+          "citation": "\"In Starlette, modifying the middleware pipeline—whether by altering how `build_middleware_stack` constructs the stack, changing core built-in middleware (`Serve...\""
+        },
+        {
+          "factId": "q6_fact_2",
+          "fact": "BaseHTTPMiddleware provides dispatch(request, call_next) abstraction for custom request interceptors",
+          "verdict": "PARTIAL",
+          "score": 0.5,
+          "citation": "\"* **Gotcha with `BaseHTTPMiddleware`:** Starlette's `BaseHTTPMiddleware` (in `starlette/middleware/base.py`) abstracts ASGI into a starlette `Request`/`Response...\""
+        },
+        {
+          "factId": "q6_fact_3",
+          "fact": "Pipeline modification directly impacts Core middlewares: ServerErrorMiddleware, ExceptionMiddleware, AuthenticationMiddleware",
+          "verdict": "PARTIAL",
+          "score": 0.5,
+          "citation": "\"In Starlette, modifying the middleware pipeline—whether by altering how `build_middleware_stack` constructs the stack, changing core built-in middleware (`Serve...\""
+        },
+        {
+          "factId": "q6_fact_4",
+          "fact": "Affects all downstream ASGI endpoints by altering request wrapping, header mutation, and exception bubbling",
+          "verdict": "COVERED",
+          "score": 1,
+          "citation": "\"In Starlette, modifying the middleware pipeline—whether by altering how `build_middleware_stack` constructs the stack, changing core built-in middleware (`Serve...\""
+        }
+      ],
+      "finalAnswer": "In Starlette, modifying the middleware pipeline—whether by altering how `build_middleware_stack` constructs the stack, changing core built-in middleware (`ServerErrorMiddleware`, `RequestBodyLimitMiddleware`, `ExceptionMiddleware`), or adjusting how user-defined middleware (`Middleware`, `add_middleware`) wrap applications—has a wide and profound **architectural impact** and a **broad blast radius**. \n\nThe mechanics, exact files, symbols, and cascading effects of modifying the middleware pipeline are detailed below.\n\n---\n\n### 1. Key Architectural Components & Files\n\n* **`starlette/applications.py` (`Starlette` class):**\n  * **`build_middleware_stack(self) -> ASGIApp`** (Lines 63–83): The central assembler of the ASGI app onion stack. It dictates the exact layering order of every request and response.\n  * **`add_middleware(...)`** (Lines 104–107): Appends or inserts user middleware into `self.user_middleware`. It enforces a strict invariant: if `self.middleware_stack` has already been built (`self.middleware_stack is not None`), calling `add_middleware` raises a `RuntimeError(\"Cannot add middleware after an application has started\")`.\n  * **`__call__(self, scope: Scope, receive: Receive, send: Send)`** (Lines 92–96): Lazily instantiates and caches `self.middleware_stack` on the very first incoming request (or when explicitly forced, e.g., in testing or instrumentation).\n* **`starlette/middleware/__init__.py` (`Middleware` class):**\n  * Encapsulates middleware classes along with their positional (`*args`) and keyword (`**kwargs`) arguments, implementing iteration unpacking (`cls, args, kwargs`) used during stack reversal.\n* **Core Built-in Middleware Layers (`starlette/applications.py:74-78`):**\n  1. **Outermost Layer (`ServerErrorMiddleware` - `starlette/middleware/errors.py`):** Catches unhandled exceptions anywhere in the entire stack and returns 500 error responses (or debug tracebacks).\n  2. **Body Limit Layer (`RequestBodyLimitMiddleware` - `starlette/middleware/body_limit.py`):** Conditionally included if `max_body_size` is configured, enforcing HTTP request body size restrictions.\n  3. **User-Defined Middleware Layer:** Iterates through `self.user_middleware` (in LIFO/reversed order).\n  4. **Innermost Layer (`ExceptionMiddleware` - `starlette/middleware/exceptions.py`):** Handles registered status-code and exception handlers occurring during routing or endpoint execution.\n\n---\n\n### 2. Blast Radius of Modifying the Pipeline\n\n#### A. Execution Order & Onion Layering (`LIFO` Semantics)\nBecause `build_middleware_stack` iterates over `reversed(middleware)` (Line 81):\n```python\napp = self.router\nfor cls, args, kwargs in reversed(middleware):\n    app = cls(app, *args, **kwargs)\n```\n* **Order of Execution:** The first middleware added to `self.user_middleware` (or placed earlier in the sequence) becomes the **outermost** custom middleware, executing first on the incoming request and last on the outgoing response.\n* **Impact of Changing Order:** Modifying how middleware is prepended or appended instantly shifts exception visibility, request modification timing, header injection, and logging contexts across the entire application. For instance, placing a logging middleware inside `ExceptionMiddleware` vs. outside `ServerErrorMiddleware` determines whether 500 server errors or handled HTTP exceptions are captured by the logger.\n\n#### B. Lifecycle & Lazy Initialization Invariant\n* **First-Request Evaluation:** The middleware stack is not built at `__init__` time; it is deferred until the first ASGI request enters `Starlette.__call__` (or when manually evaluated via `app.middleware_stack = app.build_middleware_stack()`).\n* **Runtime Lockdown:** Once initialized (`self.middleware_stack` is no longer `None`), any subsequent modification via `add_middleware` immediately triggers a `RuntimeError`. Modifying this lifecycle behavior risks race conditions in concurrent request environments or invalidating test setups.\n\n#### C. Downstream ASGI Protocols (HTTP, WebSockets, Lifespan)\n* **Scope Pollution & Preservation:** Every middleware in the stack wraps the ASGI `app` callable and receives `(scope, receive, send)`. Modifying the pipeline affects *all* protocol scopes (`http`, `websocket`, and `lifespan`). \n* **Gotcha with `BaseHTTPMiddleware`:** Starlette's `BaseHTTPMiddleware` (in `starlette/middleware/base.py`) abstracts ASGI into a starlette `Request`/`Response` cycle via `dispatch()`. However, modifying or stacking multiple `BaseHTTPMiddleware` instances has well-documented side effects regarding streaming requests, client disconnects (`test_multiple_middlewares_stacked_client_disconnected` in `tests/middleware/test_base.py`), and background tasks.\n\n#### D. Exception Handling & Debug Traces\n* Changing the position or behavior of `ServerErrorMiddleware` and `ExceptionMiddleware` alters how exceptions propagate:\n  * Unhandled exceptions bypass custom `ExceptionMiddleware` handlers if an outer middleware intercepts or suppresses them.\n  * Debug traceback formatting (`debug=self.debug`) relies directly on `ServerErrorMiddleware` occupying the absolute outer perimeter.\n\n#### E. Test Suites and TestClient Integration\n* Test utilities (such as `TestClient` in `starlette/testclient.py` and test suites in `tests/test_applications.py` and `tests/middleware/`) depend heavily on the standard structure of `build_middleware_stack`. \n* Mocking, monkeypatching, or altering the pipeline mid-test (e.g., OpenTelemetry instrumentation as seen in `tests/middleware/test_opentelemetry.py:125`) requires manually resetting or rebuilding `app.middleware_stack = app.build_middleware_stack()`. Failure to account for this caching causes tests to run against stale, pre-modification middleware stacks."
+    },
+    {
+      "arm": "oss_analyser",
+      "taskId": "q2_asgi_dispatch",
+      "question": "What is the main entry point and ASGI lifecycle dispatch for Starlette applications?",
+      "turns": 6,
+      "promptTokens": 17756,
+      "completionTokens": 1219,
+      "totalTokens": 18975,
+      "toolContextTokens": 3743,
+      "costUSD": 0.0016974000000000002,
+      "durationMs": 28672,
+      "toolCallsCount": {
+        "query_code_graph": 1,
+        "grep": 2,
+        "read_file": 2
+      },
+      "keyFactCoverage": 80,
+      "grades": [
+        {
+          "factId": "q2_fact_1",
+          "fact": "Starlette class is ASGI3 application implementing async def __call__(scope, receive, send)",
+          "verdict": "COVERED",
+          "score": 1,
+          "citation": "\"In Starlette, ASGI (Asynchronous Server Gateway Interface) applications follow the standard ASGI callable protocol (`async def __call__(self, scope, receive, se...\""
+        },
+        {
+          "factId": "q2_fact_2",
+          "fact": "Dispatch branches by scope['type'] handling 'http', 'websocket', and 'lifespan' events",
+          "verdict": "COVERED",
+          "score": 1,
+          "citation": "\"assert scope[\"type\"] in (\"http\", \"websocket\", \"lifespan\")...\""
+        },
+        {
+          "factId": "q2_fact_3",
+          "fact": "Lifespan events manage startup and shutdown state via Lifespan or Router.lifespan context handlers",
+          "verdict": "COVERED",
+          "score": 1,
+          "citation": "\"Lifespan events (`startup` and `shutdown`) are handled by `Router.lifespan(...)` in **`starlette/routing.py`**...\""
+        },
+        {
+          "factId": "q2_fact_4",
+          "fact": "build_middleware_stack() constructs nested ASGI callable chain wrapping Router with user and default middlewares in reverse order",
+          "verdict": "COVERED",
+          "score": 1,
+          "citation": "\"* **Middleware Stack Initialization**: Lazily builds or reuses the application's middleware stack via `self.build_middleware_stack()` (which wraps the underlyin...\""
+        },
+        {
+          "factId": "q2_fact_5",
+          "fact": "Uncaught exceptions during dispatch are caught by ServerErrorMiddleware and ExceptionMiddleware",
+          "verdict": "NOT_COVERED",
+          "score": 0,
+          "citation": "(no matching context found in answer)"
+        }
+      ],
+      "finalAnswer": "In Starlette, ASGI (Asynchronous Server Gateway Interface) applications follow the standard ASGI callable protocol (`async def __call__(self, scope, receive, send)`). The main entry point and ASGI lifecycle dispatch are primarily orchestrated across two key classes: **`Starlette`** in `starlette/applications.py` and **`Router`** in `starlette/routing.py`.\n\n---\n\n### 1. Main Entry Point: `Starlette.__call__`\n\nThe primary ASGI application entry point for a Starlette application is the `__call__` method on the `Starlette` class located in **`starlette/applications.py`**:\n\n```python\nasync def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:\n    scope[\"app\"] = self\n    if self.middleware_stack is None:\n        self.middleware_stack = self.build_middleware_stack()\n    await self.middleware_stack(scope, receive, send)\n```\n\n#### Key Responsibilities:\n* **Scope Injection**: Injects the application instance into `scope[\"app\"] = self` so that downstream components (like routers, exception handlers, and lifespan handlers) can access the app instance.\n* **Middleware Stack Initialization**: Lazily builds or reuses the application's middleware stack via `self.build_middleware_stack()` (which wraps the underlying router with all configured middleware classes in reverse order).\n* **ASGI Dispatch Hand-off**: Delegates execution directly to the built `middleware_stack`.\n\n---\n\n### 2. ASGI Lifecycle & Request Routing Dispatch: `Router.__call__` and `Router.app`\n\nOnce the middleware stack is traversed, execution reaches the application's underlying `Router` (`starlette/routing.py`), which implements `Router.__call__` and `Router.app`:\n\n```python\nasync def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:\n    \"\"\"\n    The main entry point to the Router class.\n    \"\"\"\n    await self.middleware_stack(scope, receive, send)\n\nasync def app(self, scope: Scope, receive: Receive, send: Send) -> None:\n    assert scope[\"type\"] in (\"http\", \"websocket\", \"lifespan\")\n\n    if \"router\" not in scope:\n        scope[\"router\"] = self\n\n    if scope[\"type\"] == \"lifespan\":\n        await self.lifespan(scope, receive, send)\n        return\n    ...\n```\n\n---\n\n### 3. ASGI Lifecycle Dispatch (`lifespan`)\n\nLifespan events (`startup` and `shutdown`) are handled by `Router.lifespan(...)` in **`starlette/routing.py`**. When an ASGI server sends a `\"lifespan\"` scope (`scope[\"type\"] == \"lifespan\"`), Starlette manages application state and startup/shutdown lifecycle hooks:\n\n```python\nasync def lifespan(self, scope: Scope, receive: Receive, send: Send) -> None:\n    \"\"\"\n    Handle ASGI lifespan messages, which allows us to manage application\n    startup and shutdown events.\n    \"\"\"\n    started = False\n    app: Any = scope.get(\"app\")\n    await receive()  # Wait for lifespan.startup message\n    try:\n        async with self.lifespan_context(app) as maybe_state:\n            if maybe_state is not None:\n                if \"state\" not in scope:\n                    raise RuntimeError('The server does not support \"state\" in the lifespan scope.')\n                scope[\"state\"].update(maybe_state)\n            await send({\"type\": \"lifespan.startup.complete\"})\n            started = True\n            await receive()  # Wait for lifespan.shutdown message\n    except BaseException:\n        exc_text = traceback.format_exc()\n        if started:\n            await send({\"type\": \"lifespan.shutdown.failed\", \"message\": exc_text})\n        else:\n            await send({\"type\": \"lifespan.startup.failed\", \"message\": exc_text})\n        raise\n    else:\n        await send({\"type\": \"lifespan.shutdown.complete\"})\n```\n\n#### Lifespan Flow:\n1. **Startup Phase**: Receives the initial server event, enters the asynchronous context manager (`self.lifespan_context(app)`), updates `scope[\"state\"]` if state data is returned, and sends `{\"type\": \"lifespan.startup.complete\"}` (or `lifespan.startup.failed` on error).\n2. **Execution Phase**: The server handles HTTP/WebSocket requests during application uptime.\n3. **Shutdown Phase**: Receives the shutdown signal from the server, exits the context manager cleanly, and sends `{\"type\": \"lifespan.shutdown.complete\"}` (or `lifespan.shutdown.failed` if an exception occurred)."
+    },
+    {
+      "arm": "oss_analyser",
+      "taskId": "q3_exceptions",
+      "question": "How are HTTP and WebSocket errors / exceptions caught and handled in Starlette?",
+      "turns": 8,
+      "promptTokens": 21726,
+      "completionTokens": 1212,
+      "totalTokens": 22938,
+      "toolContextTokens": 3193,
+      "costUSD": 0.00199305,
+      "durationMs": 45194,
+      "toolCallsCount": {
+        "query_code_graph": 1,
+        "grep": 2,
+        "read_file": 3,
+        "list_dir": 1
+      },
+      "keyFactCoverage": 87.5,
+      "grades": [
+        {
+          "factId": "q3_fact_1",
+          "fact": "ExceptionMiddleware catches downstream exceptions and maps them against registered exception_handlers dictionary",
+          "verdict": "COVERED",
+          "score": 1,
+          "citation": "\"Errors are primarily intercepted and handled by **`ExceptionMiddleware`** (`starlette/middleware/exceptions.py`), which works closely with **`wrap_app_handling_...\""
+        },
+        {
+          "factId": "q3_fact_2",
+          "fact": "HTTPException carries status_code and detail and produces structured HTTP error responses",
+          "verdict": "COVERED",
+          "score": 1,
+          "citation": "\"It encapsulates standard HTTP errors (`status_code`, `detail`, and optional `headers`)...\""
+        },
+        {
+          "factId": "q3_fact_3",
+          "fact": "ServerErrorMiddleware acts as outer safety net for unhandled 500 server errors",
+          "verdict": "COVERED",
+          "score": 1,
+          "citation": "\"**Status Code Precedence (`HTTPException`)**: If an `HTTPException` is raised, Starlette first checks if a specific **status-code handler** (e.g., handling a 40...\""
+        },
+        {
+          "factId": "q3_fact_4",
+          "fact": "WebSocket disconnects and exceptions are surfaced as WebSocketDisconnect with closure status codes",
+          "verdict": "PARTIAL",
+          "score": 0.5,
+          "citation": "\"It encapsulates standard HTTP errors (`status_code`, `detail`, and optional `headers`)...\""
+        }
+      ],
+      "finalAnswer": "In Starlette, HTTP and WebSocket errors and exceptions are caught, processed, and handled through a dedicated exception-handling subsystem composed of specific exception classes, ASGI middleware, and lookup helpers.\n\n---\n\n### 1. Core Exception Classes (`starlette/exceptions.py`)\nStarlette defines two built-in application-level exceptions:\n* **`HTTPException`**: Inherits from Python's standard `Exception` class. It encapsulates standard HTTP errors (`status_code`, `detail`, and optional `headers`). If `detail` is omitted, it defaults to the standard reason phrase associated with the status code via `http.client.responses`.\n* **`WebSocketException`**: Used specifically for WebSockets, encapsulating a close `code` (e.g., standard WebSocket close codes) and an optional `reason` string.\n\n---\n\n### 2. Exception Handling Middleware & Routines\nErrors are primarily intercepted and handled by **`ExceptionMiddleware`** (`starlette/middleware/exceptions.py`), which works closely with **`wrap_app_handling_exceptions`** (`starlette/_exception_handler.py`).\n\n#### A. Storing and Passing Handlers (`ExceptionMiddleware`)\n* Located in `starlette/middleware/exceptions.py`, `ExceptionMiddleware` initializes default exception handlers for the core error types:\n  * `HTTPException` $\\rightarrow$ mapped to `self.http_exception` (returns a `PlainTextResponse` with `exc.detail` and `exc.headers`, or an empty response for `204` / `304` status codes).\n  * `WebSocketException` $\\rightarrow$ mapped to `self.websocket_exception` (closes the WebSocket connection using `await websocket.close(code=exc.code, reason=exc.reason)`).\n* When an HTTP or WebSocket request passes through `ExceptionMiddleware.__call__`:\n  1. It injects a tuple of exception/status handlers into the ASGI `scope` under `scope[\"starlette.exception_handlers\"]`.\n  2. It wraps the connection as either a `Request` or a `WebSocket` instance (`conn`).\n  3. It wraps and invokes the downstream ASGI application via `wrap_app_handling_exceptions`.\n\n#### B. Catching and Dispatched Routing (`wrap_app_handling_exceptions`)\nLocated in `starlette/_exception_handler.py`, this function wraps the downstream ASGI application call inside a `try...except Exception as exc` block:\n1. **Status Code Precedence (`HTTPException`)**: If an `HTTPException` is raised, Starlette first checks if a specific **status-code handler** (e.g., handling a 404 or 500 error specifically via `app.add_exception_handler(404, handler)`) has been registered in `status_handlers`.\n2. **Class-Hierarchy Lookup (`_lookup_exception_handler`)**: If no status-code specific handler matches (or if it's a general `Exception` or `WebSocketException`), it traverses the exception's Method Resolution Order (`type(exc).__mro__`) to find a matching registered exception class handler (`exception_handlers`).\n3. **Response Started Guard**: It monitors response sending via a custom `sender` wrapper (`response_started = True` once `http.response.start` is sent). If an exception occurs *after* headers have already been transmitted to the client, a `RuntimeError` (\"*Caught handled exception, but response already started.*\") is raised because headers cannot be modified.\n4. **Execution of Handler**: \n   * If the resolved handler is a coroutine function (`is_async_callable`), it is awaited directly: `response = await handler(conn, exc)`.\n   * Otherwise, synchronous handlers are run safely in an external threadpool: `response = await run_in_threadpool(handler, conn, exc)`.\n5. **Final Response Delivery**: If the exception handler returns a valid `Response` object, it is executed and sent back over the ASGI connection (`await response(scope, receive, sender)`).\n\n---\n\n### 3. Server-Level Error Handling (`ServerErrorMiddleware`)\nFor unhandled server errors (i.e., standard Python `Exception` types bubbling past all exception handlers during HTTP requests), Starlette uses **`ServerErrorMiddleware`** (`starlette/middleware/errors.py`). \n* Added automatically as the outermost application middleware by default in `Starlette` (`starlette/applications.py`), it catches general unhandled exceptions.\n* If `debug=True`, it returns a detailed HTML trace page (`generate_html`).\n* If `debug=False`, it fails safely by returning a generic `500 Internal Server Error` plain text response to avoid leaking sensitive stack traces in production."
+    },
+    {
+      "arm": "oss_analyser",
+      "taskId": "q1_authentication",
+      "question": "How does authentication and credential validation work across HTTP requests and WebSockets in Starlette?",
+      "turns": 4,
+      "promptTokens": 8246,
+      "completionTokens": 1322,
+      "totalTokens": 9568,
+      "toolContextTokens": 2861,
+      "costUSD": 0.00101505,
+      "durationMs": 26714,
+      "toolCallsCount": {
+        "query_code_graph": 1,
+        "read_file": 2
+      },
+      "keyFactCoverage": 100,
+      "grades": [
+        {
+          "factId": "q1_fact_1",
+          "fact": "AuthenticationBackend provides abstract authenticate(conn) method returning (AuthCredentials, BaseUser) tuple",
+          "verdict": "COVERED",
+          "score": 1,
+          "citation": "\"- **`AuthenticationBackend` Interface:** Subclasses implement `async def authenticate(self, conn: HTTPConnection) -> tuple[AuthCredentials, BaseUser] | None` (`...\""
+        },
+        {
+          "factId": "q1_fact_2",
+          "fact": "AuthenticationMiddleware intercepts ASGI connection and populates conn.scope['auth'] and conn.scope['user']",
+          "verdict": "COVERED",
+          "score": 1,
+          "citation": "\"**The ASGI Middleware Layer (`AuthenticationMiddleware`)**: Intercepts incoming connections, extracts credentials, invokes authentication backends, and populate...\""
+        },
+        {
+          "factId": "q1_fact_3",
+          "fact": "Unauthenticated requests fall back to UnauthenticatedUser and empty AuthCredentials()",
+          "verdict": "COVERED",
+          "score": 1,
+          "citation": "\"- If `auth_result` is `None`, default unauthenticated objects are assigned: `scope[\"auth\"], scope[\"user\"] = AuthCredentials(), UnauthenticatedUser()` (`starlett...\""
+        },
+        {
+          "factId": "q1_fact_4",
+          "fact": "requires(scopes) decorator checks has_required_scope and raises AuthenticationError or HTTPException 403 on missing permissions",
+          "verdict": "COVERED",
+          "score": 1,
+          "citation": "\"| **Authorization Failure (`@requires`)** | Raises `HTTPException` (e.g., `403`) or returns a `RedirectResponse`...\""
+        },
+        {
+          "factId": "q1_fact_5",
+          "fact": "Default authentication error handler returns PlainTextResponse with HTTP 400 Bad Request status",
+          "verdict": "COVERED",
+          "score": 1,
+          "citation": "\"- For **HTTP requests**, the `on_error` handler (defaulting to `AuthenticationMiddleware.default_on_error` returning a `PlainTextResponse` with status 400) is c...\""
+        }
+      ],
+      "finalAnswer": "In Starlette, authentication and credential validation are handled uniformly across both **HTTP requests** and **WebSockets** at two architectural layers:\n1. **The ASGI Middleware Layer (`AuthenticationMiddleware`)**: Intercepts incoming connections, extracts credentials, invokes authentication backends, and populates the ASGI `scope`.\n2. **The Endpoint/Decorator Layer (`requires` decorator)**: Enforces authorization and permission scoping on individual HTTP endpoints and WebSocket handlers.\n\n---\n\n### 1. The ASGI Middleware Layer (`AuthenticationMiddleware`)\n\nDefined in `starlette/middleware/authentication.py`, `AuthenticationMiddleware` is an ASGI middleware that inspects both `http` and `websocket` connection scopes.\n\n#### How it works:\n1. **Scope Filtering:** In `AuthenticationMiddleware.__call__` (`starlette/middleware/authentication.py:29`), it checks if `scope[\"type\"]` is `\"http\"` or `\"websocket\"`. If not, it passes the ASGI call down the stack unmodified:\n   ```python\n   if scope[\"type\"] not in [\"http\", \"websocket\"]:\n       await self.app(scope, receive, send)\n       return\n   ```\n2. **Connection Abstraction:** It wraps the ASGI `scope` into an `HTTPConnection(scope)` (`starlette/requests.py`), providing a unified interface (`headers`, `cookies`, `query_params`, `session`) for inspecting connection details regardless of whether it is an HTTP request or a WebSocket connection.\n3. **Backend Invocation:** It awaits the backend's authenticate method:\n   ```python\n   conn = HTTPConnection(scope)\n   try:\n       auth_result = await self.backend.authenticate(conn)\n   except AuthenticationError as exc:\n       response = self.on_error(conn, exc)\n       if scope[\"type\"] == \"websocket\":\n           await send({\"type\": \"websocket.close\", \"code\": 1000})\n       else:\n           await response(scope, receive, send)\n       return\n   ```\n   - **`AuthenticationBackend` Interface:** Subclasses implement `async def authenticate(self, conn: HTTPConnection) -> tuple[AuthCredentials, BaseUser] | None` (`starlette/authentication.py:105`).\n4. **Credential & User Assignment:**\n   - If authentication succeeds, `authenticate` returns a tuple of `(AuthCredentials, BaseUser)`. These are assigned to `scope[\"auth\"]` and `scope[\"user\"]`.\n   - If `auth_result` is `None`, default unauthenticated objects are assigned: `scope[\"auth\"], scope[\"user\"] = AuthCredentials(), UnauthenticatedUser()` (`starlette/middleware/authentication.py:46`).\n5. **Error Handling Discrepancy (HTTP vs WebSocket):**\n   - If an `AuthenticationError` is raised during credential validation:\n     - For **HTTP requests**, the `on_error` handler (defaulting to `AuthenticationMiddleware.default_on_error` returning a `PlainTextResponse` with status 400) is converted into a standard HTTP response sent over ASGI `send`.\n     - For **WebSockets**, since HTTP response objects cannot be sent across a WebSocket transport, it immediately sends a WebSocket close frame (`{\"type\": \"websocket.close\", \"code\": 1000}`) and terminates.\n\n---\n\n### 2. The Endpoint/Decorator Layer (`requires`)\n\nDefined in `starlette/authentication.py`, the `@requires` decorator enforces permission scopes on routing endpoints. It automatically adapts to HTTP requests and WebSockets based on the function signature and parameter names.\n\n#### How it works:\n1. **Parameter Inspection:** The decorator inspects the wrapped function's signature (`starlette/authentication.py:35`) for an argument named `\"request\"` or `\"websocket\"`.\n2. **WebSocket Wrapper (`websocket_wrapper`)**: If the parameter is named `\"websocket\"`, it wraps the handler with `websocket_wrapper` (`starlette/authentication.py:46`):\n   ```python\n   if not has_required_scope(websocket, scopes_list):\n       await websocket.close()\n   else:\n       await func(*args, **kwargs)\n   ```\n   - If the connection lacks the required scopes (`has_required_scope` checks `conn.auth.scopes`), it closes the WebSocket connection (`await websocket.close()`). Otherwise, it proceeds to execute the handler.\n3. **HTTP Wrappers (`async_wrapper` / `sync_wrapper`)**: If the parameter is named `\"request\"`, it wraps async or sync HTTP endpoints (`starlette/authentication.py:63, 82`):\n   - If scopes are missing and a `redirect` URL is configured, it returns a 303 `RedirectResponse` pointing to the login page with a `?next=` query parameter.\n   - Otherwise, it raises an `HTTPException` (defaulting to status code `403 Forbidden`).\n\n---\n\n### Summary of Differences between HTTP and WebSockets\n\n| Feature / Action | HTTP Requests (`http`) | WebSockets (`websocket`) |\n| :--- | :--- | :--- |\n| **Connection Wrapper** | `HTTPConnection` / `Request` | `HTTPConnection` / `WebSocket` |\n| **Middleware Error Handling** | Invokes `on_error` and returns an HTTP `Response` (e.g., `PlainTextResponse`). | Sends a WebSocket close message (`websocket.close`, code `1000`). |\n| **Authorization Failure (`@requires`)** | Raises `HTTPException` (e.g., `403`) or returns a `RedirectResponse`. | Closes the WebSocket connection (`websocket.close()`). |"
+    }
+  ]
+}

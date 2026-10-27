@@ -1,0 +1,263 @@
+{
+  "name": "Starlette Code-Intelligence Benchmark Suite",
+  "version": "2.1.0",
+  "frozenAt": "2026-10-27T03:10:00Z",
+  "repository": {
+    "name": "encode/starlette",
+    "language": "python",
+    "files": 84
+  },
+  "tasks": [
+    {
+      "id": "q1_authentication",
+      "question": "How does authentication and credential validation work across HTTP requests and WebSockets in Starlette?",
+      "targetFiles": [
+        "starlette/authentication.py",
+        "starlette/middleware/authentication.py"
+      ],
+      "goldFacts": [
+        {
+          "id": "q1_fact_1",
+          "fact": "AuthenticationBackend provides abstract authenticate(conn) method returning (AuthCredentials, BaseUser) tuple or None",
+          "sourceLocation": "starlette/authentication.py#L105-L107",
+          "acceptanceCriteria": "Explains that AuthenticationBackend defines an async authenticate method taking an HTTPConnection and returning a tuple of (AuthCredentials, BaseUser) or None.",
+          "keywords": ["AuthenticationBackend", "authenticate", "AuthCredentials", "BaseUser"]
+        },
+        {
+          "id": "q1_fact_2",
+          "fact": "AuthenticationMiddleware intercepts ASGI connection and populates conn.scope['auth'] and conn.scope['user']",
+          "sourceLocation": "starlette/middleware/authentication.py#L34-L48",
+          "acceptanceCriteria": "Explains that AuthenticationMiddleware intercepts HTTP and WebSocket scopes, calls the backend, and injects auth and user into scope.",
+          "keywords": ["AuthenticationMiddleware", "scope", "auth", "user"]
+        },
+        {
+          "id": "q1_fact_3",
+          "fact": "Unauthenticated requests fall back to UnauthenticatedUser and empty AuthCredentials()",
+          "sourceLocation": "starlette/middleware/authentication.py#L45-L46",
+          "acceptanceCriteria": "Explains that if the backend returns None (unauthenticated), Starlette defaults to (AuthCredentials(), UnauthenticatedUser()).",
+          "keywords": ["UnauthenticatedUser", "AuthCredentials"]
+        },
+        {
+          "id": "q1_fact_4",
+          "fact": "requires(scopes) decorator checks has_required_scope and raises AuthenticationError or HTTPException 403 on missing permissions (closes WebSocket)",
+          "sourceLocation": "starlette/authentication.py#L25-L95",
+          "acceptanceCriteria": "Explains that @requires checks scopes with has_required_scope, raising HTTPException (default 403) or redirecting for HTTP, and closing the connection for WebSockets.",
+          "keywords": ["requires", "has_required_scope", "HTTPException", "403"]
+        },
+        {
+          "id": "q1_fact_5",
+          "fact": "Default authentication error handler returns PlainTextResponse with HTTP 400 Bad Request status",
+          "sourceLocation": "starlette/middleware/authentication.py#L19-L20",
+          "acceptanceCriteria": "Explains that on authentication error, the default handler (default_on_error or on_error) returns a PlainTextResponse with status 400.",
+          "keywords": ["default_on_error", "PlainTextResponse", "400", "on_error"]
+        }
+      ]
+    },
+    {
+      "id": "q2_asgi_dispatch",
+      "question": "What is the main entry point and ASGI lifecycle dispatch for Starlette applications?",
+      "targetFiles": [
+        "starlette/applications.py",
+        "starlette/routing.py"
+      ],
+      "goldFacts": [
+        {
+          "id": "q2_fact_1",
+          "fact": "Starlette class is ASGI3 application implementing async def __call__(scope, receive, send)",
+          "sourceLocation": "starlette/applications.py#L123-L128",
+          "acceptanceCriteria": "Explains that Starlette implements the ASGI3 protocol callable `async def __call__(scope, receive, send)`.",
+          "keywords": ["Starlette", "__call__", "scope", "receive", "send"]
+        },
+        {
+          "id": "q2_fact_2",
+          "fact": "Dispatch branches by scope['type'] handling 'http', 'websocket', and 'lifespan' events",
+          "sourceLocation": "starlette/routing.py#L717-L733",
+          "acceptanceCriteria": "Explains that routing dispatch checks scope type and handles http, websocket, and lifespan events accordingly.",
+          "keywords": ["scope", "type", "http", "websocket", "lifespan"]
+        },
+        {
+          "id": "q2_fact_3",
+          "fact": "Lifespan events manage startup and shutdown state via Router.lifespan context handler and ASGI lifespan messages",
+          "sourceLocation": "starlette/routing.py#L738-L777",
+          "acceptanceCriteria": "Explains that lifespan events manage startup/shutdown lifecycle via Router.lifespan using lifespan messages or async context managers.",
+          "keywords": ["lifespan", "startup", "shutdown", "Router"]
+        },
+        {
+          "id": "q2_fact_4",
+          "fact": "build_middleware_stack() constructs nested ASGI callable chain wrapping Router with user and default middlewares in reverse order",
+          "sourceLocation": "starlette/applications.py#L66-L84",
+          "acceptanceCriteria": "Explains that build_middleware_stack() constructs the nested ASGI callable chain by wrapping the core Router with user and built-in middlewares, and explicitly notes that user middleware is applied in reverse order (reversed(self.user_middleware) / inside-out). Both the wrapping of Router and the reverse order must be explained for full credit.",
+          "keywords": ["build_middleware_stack", "Router", "middleware", "reversed"]
+        },
+        {
+          "id": "q2_fact_5",
+          "fact": "Uncaught exceptions during dispatch are caught by ServerErrorMiddleware (outermost) and ExceptionMiddleware (innermost)",
+          "sourceLocation": "starlette/applications.py#L74-L79",
+          "acceptanceCriteria": "Explains that build_middleware_stack adds ServerErrorMiddleware as the outermost layer (500 handler) and ExceptionMiddleware as the innermost layer wrapping Router.",
+          "keywords": ["ServerErrorMiddleware", "ExceptionMiddleware"]
+        }
+      ]
+    },
+    {
+      "id": "q3_exceptions",
+      "question": "How are HTTP and WebSocket errors / exceptions caught and handled in Starlette?",
+      "targetFiles": [
+        "starlette/exceptions.py",
+        "starlette/middleware/exceptions.py",
+        "starlette/middleware/errors.py"
+      ],
+      "goldFacts": [
+        {
+          "id": "q3_fact_1",
+          "fact": "ExceptionMiddleware catches downstream exceptions and maps them against registered exception_handlers dictionary",
+          "sourceLocation": "starlette/middleware/exceptions.py#L22-L46",
+          "acceptanceCriteria": "Explains that ExceptionMiddleware intercepts exceptions and dispatches them via _lookup_exception_handler / exception_handlers dictionary.",
+          "keywords": ["ExceptionMiddleware", "exception_handlers"]
+        },
+        {
+          "id": "q3_fact_2",
+          "fact": "HTTPException carries status_code and detail and produces structured HTTP error responses",
+          "sourceLocation": "starlette/exceptions.py#L8-L20",
+          "acceptanceCriteria": "Explains that HTTPException encapsulates status_code, detail, and optional headers, handled by self.http_exception returning a response.",
+          "keywords": ["HTTPException", "status_code", "detail"]
+        },
+        {
+          "id": "q3_fact_3",
+          "fact": "ServerErrorMiddleware acts as outer safety net catching uncaught exceptions and returning 500 responses",
+          "sourceLocation": "starlette/middleware/errors.py#L24-L50",
+          "acceptanceCriteria": "Explains that ServerErrorMiddleware (in starlette/middleware/errors.py) is the outermost safety net that intercepts unhandled exceptions across the application to return a 500 HTTP response (or debug traceback page). The answer must explicitly identify this built-in middleware; asserting that uncaught exceptions bubble directly to Uvicorn/ASGI server without being caught by Starlette's error middleware must be graded NOT_COVERED.",
+          "keywords": ["ServerErrorMiddleware", "500"]
+        },
+        {
+          "id": "q3_fact_4",
+          "fact": "WebSocketException encapsulates close code and reason, caught by ExceptionMiddleware to close connections (e.g. code 1008 or 1000)",
+          "sourceLocation": "starlette/exceptions.py#L23-L27",
+          "acceptanceCriteria": "Explains that WebSocket errors/exceptions are represented by WebSocketException (or WebSocketDisconnect) with a close code and reason, handled by closing the websocket connection.",
+          "keywords": ["WebSocketException", "WebSocketDisconnect", "close", "code"]
+        }
+      ]
+    },
+    {
+      "id": "q4_routing",
+      "question": "How does routing match incoming paths and resolve route parameters?",
+      "targetFiles": [
+        "starlette/routing.py"
+      ],
+      "goldFacts": [
+        {
+          "id": "q4_fact_1",
+          "fact": "Router evaluates registered routes sequentially calling route.matches(scope)",
+          "sourceLocation": "starlette/routing.py#L717-L733",
+          "acceptanceCriteria": "Explains that Router iterates through routes list and calls route.matches(scope) to find matching endpoint.",
+          "keywords": ["Router", "matches", "routes"]
+        },
+        {
+          "id": "q4_fact_2",
+          "fact": "compile_path converts format strings into regex patterns and parameter converter mappings",
+          "sourceLocation": "starlette/routing.py#L115-L149",
+          "acceptanceCriteria": "Explains that compile_path takes path format strings and returns a regex, format string, and converter mapping dict.",
+          "keywords": ["compile_path", "regex", "convertor", "converter"]
+        },
+        {
+          "id": "q4_fact_3",
+          "fact": "Matched path parameters are parsed and stored in scope['path_params']",
+          "sourceLocation": "starlette/routing.py#L143-L149",
+          "acceptanceCriteria": "Explains that extracted path parameters are populated into scope['path_params'].",
+          "keywords": ["path_params", "scope"]
+        },
+        {
+          "id": "q4_fact_4",
+          "fact": "Routing matches yield Match enum results: Match.FULL, Match.PARTIAL, or Match.NONE",
+          "sourceLocation": "starlette/routing.py#L36-L40",
+          "acceptanceCriteria": "Explains that route matching produces a Match enum value: Match.FULL, Match.PARTIAL, or Match.NONE.",
+          "keywords": ["Match.FULL", "Match.PARTIAL", "Match.NONE", "Match"]
+        }
+      ]
+    },
+    {
+      "id": "q5_request_response",
+      "question": "What are the core abstractions for Request and Response objects and how are streaming bodies handled?",
+      "targetFiles": [
+        "starlette/requests.py",
+        "starlette/responses.py",
+        "starlette/datastructures.py"
+      ],
+      "goldFacts": [
+        {
+          "id": "q5_fact_1",
+          "fact": "HTTPConnection is common base class for Request and WebSocket wrapping raw ASGI scope",
+          "sourceLocation": "starlette/requests.py#L81-L95",
+          "acceptanceCriteria": "Explains that HTTPConnection is the shared base class for Request and WebSocket wrapping the ASGI scope.",
+          "keywords": ["HTTPConnection", "Request", "WebSocket", "scope"]
+        },
+        {
+          "id": "q5_fact_2",
+          "fact": "Request provides asynchronous body consumption methods: stream(), body(), json(), form()",
+          "sourceLocation": "starlette/requests.py#L210-L260",
+          "acceptanceCriteria": "Explains that Request reads the body asynchronously via stream(), body(), json(), or form().",
+          "keywords": ["stream", "body", "json", "form"]
+        },
+        {
+          "id": "q5_fact_3",
+          "fact": "Headers and QueryParams provide immutable case-insensitive and multi-value mapping access",
+          "sourceLocation": "starlette/datastructures.py#L32-L175",
+          "acceptanceCriteria": "Explains that Headers (case-insensitive) and QueryParams (multi-value getlist) provide HTTP header and query access.",
+          "keywords": ["Headers", "QueryParams", "datastructures"]
+        },
+        {
+          "id": "q5_fact_4",
+          "fact": "Response transmits headers and streams body chunks via ASGI send http.response.start and http.response.body",
+          "sourceLocation": "starlette/responses.py#L60-L75",
+          "acceptanceCriteria": "Explains that Response sends http.response.start (status code and headers) followed by http.response.body chunk(s).",
+          "keywords": ["http.response.start", "http.response.body", "send"]
+        },
+        {
+          "id": "q5_fact_5",
+          "fact": "Specialized response classes include JSONResponse, PlainTextResponse, StreamingResponse, RedirectResponse",
+          "sourceLocation": "starlette/responses.py#L120-L280",
+          "acceptanceCriteria": "Explains the specialized responses: JSONResponse, PlainTextResponse, StreamingResponse, RedirectResponse, HTMLResponse.",
+          "keywords": ["JSONResponse", "PlainTextResponse", "StreamingResponse", "RedirectResponse"]
+        }
+      ]
+    },
+    {
+      "id": "q6_blast_radius",
+      "question": "What is the blast radius and architectural impact of modifying the middleware pipeline in Starlette?",
+      "targetFiles": [
+        "starlette/middleware/__init__.py",
+        "starlette/middleware/base.py",
+        "starlette/applications.py"
+      ],
+      "goldFacts": [
+        {
+          "id": "q6_fact_1",
+          "fact": "Middleware class encapsulates middleware class and kwargs instantiated during Starlette.build_middleware_stack()",
+          "sourceLocation": "starlette/middleware/__init__.py#L6-L16",
+          "acceptanceCriteria": "Explains that Middleware objects store a middleware class and constructor arguments, instantiated when build_middleware_stack() is called.",
+          "keywords": ["Middleware", "build_middleware_stack"]
+        },
+        {
+          "id": "q6_fact_2",
+          "fact": "BaseHTTPMiddleware provides dispatch(request, call_next) abstraction for custom request interceptors",
+          "sourceLocation": "starlette/middleware/base.py#L42-L55",
+          "acceptanceCriteria": "Explains that BaseHTTPMiddleware provides a high-level request/response dispatch method (taking request and call_next callable).",
+          "keywords": ["BaseHTTPMiddleware", "dispatch", "call_next"]
+        },
+        {
+          "id": "q6_fact_3",
+          "fact": "Pipeline modification directly impacts built-in core middlewares: ServerErrorMiddleware (outermost) and ExceptionMiddleware (innermost)",
+          "sourceLocation": "starlette/applications.py#L66-L84",
+          "acceptanceCriteria": "Explains that the middleware pipeline automatically nests ServerErrorMiddleware as the outermost safety net and ExceptionMiddleware as the innermost wrapper around the Router.",
+          "keywords": ["ServerErrorMiddleware", "ExceptionMiddleware"]
+        },
+        {
+          "id": "q6_fact_4",
+          "fact": "Affects all downstream ASGI endpoints by altering request wrapping, header mutation, and exception bubbling",
+          "sourceLocation": "starlette/applications.py#L74-L84",
+          "acceptanceCriteria": "Explains that middleware placement affects downstream endpoints by altering request scope, response headers, and whether exceptions reach error handlers.",
+          "keywords": ["ASGI", "endpoints", "request", "exception"]
+        }
+      ]
+    }
+  ]
+}

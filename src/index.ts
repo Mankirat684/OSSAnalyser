@@ -1,0 +1,28 @@
+import { createApp } from "./api/app.js";
+import { config } from "./config/env.js";
+import { createIngestWorker } from "./modules/queue/index.js";
+import { initializeDatabase } from "./modules/storage/initDb.js";
+
+async function bootstrap() {
+  // Auto-initialize PostgreSQL schema if database is reachable
+  try {
+    await initializeDatabase();
+  } catch (err: any) {
+    console.warn("[DB Auto-Init] PostgreSQL schema check deferred:", err?.message || err);
+  }
+
+  const app = createApp();
+
+  // Start background queue worker
+  createIngestWorker(1);
+
+  app.listen(config.server.port, () => {
+    console.log(`\n🚀 OSS Analyser running on http://localhost:${config.server.port}`);
+    console.log(`📡 Ingestion Worker listening on BullMQ queue: "repo-ingestion"\n`);
+  });
+}
+
+bootstrap().catch((err) => {
+  console.error("Fatal startup error:", err);
+  process.exit(1);
+});

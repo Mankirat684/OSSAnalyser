@@ -1,0 +1,82 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "name": "pmndrs/zustand Benchmark Frozen Rubric Specification",
+  "version": "1.0.0",
+  "frozenAt": "2026-10-24T18:30:00Z",
+  "repository": {
+    "name": "zustand",
+    "owner": "pmndrs",
+    "language": "TypeScript",
+    "primaryDomain": "React State Management"
+  },
+  "tasks": [
+    {
+      "id": "query_1_arch",
+      "type": "architecture",
+      "question": "How does Zustand separate vanilla state management from React hooks?",
+      "targetFiles": [
+        "bench_repos/zustand/src/vanilla.ts",
+        "bench_repos/zustand/src/react.ts",
+        "bench_repos/zustand/src/traditional.ts",
+        "bench_repos/zustand/src/index.ts"
+      ],
+      "requiredFactTerms": [
+        "createStore",
+        "useStore",
+        "vanilla",
+        "react"
+      ],
+      "rationale": "Verifies that context explains the decoupled vanilla closure store and the React useSyncExternalStore / useStore hook adapter."
+    },
+    {
+      "id": "query_2_mechanism",
+      "type": "mechanism",
+      "question": "How does the persist middleware serialize state and handle storage hydration?",
+      "targetFiles": [
+        "bench_repos/zustand/src/middleware/persist.ts",
+        "bench_repos/zustand/src/middleware.ts"
+      ],
+      "requiredFactTerms": [
+        "persist",
+        "storage",
+        "hydrate",
+        "serialize"
+      ],
+      "rationale": "Checks whether the payload reveals StateStorage serialization, asynchronous hydration, and thenable storage operations."
+    },
+    {
+      "id": "query_3_impact",
+      "type": "impact",
+      "question": "What functions and modules depend on createStore from vanilla.ts?",
+      "targetFiles": [
+        "bench_repos/zustand/src/vanilla.ts",
+        "bench_repos/zustand/src/react.ts",
+        "bench_repos/zustand/src/middleware/devtools.ts",
+        "bench_repos/zustand/src/middleware/persist.ts",
+        "bench_repos/zustand/src/middleware/combine.ts"
+      ],
+      "requiredFactTerms": [
+        "createStore",
+        "devtools",
+        "persist",
+        "react"
+      ],
+      "rationale": "Checks whether the blast radius includes React adapters, devtools, and persistence middleware."
+    },
+    {
+      "id": "query_4_contract",
+      "type": "contract",
+      "question": "What is the interface contract and signature of subscribeWithSelector middleware?",
+      "targetFiles": [
+        "bench_repos/zustand/src/middleware/subscribeWithSelector.ts"
+      ],
+      "requiredFactTerms": [
+        "subscribeWithSelector",
+        "listener",
+        "selector",
+        "equalityFn"
+      ],
+      "rationale": "Verifies that the structural contract contains the function signature, slice selector parameter, listener callback, and equality comparison function."
+    }
+  ]
+}

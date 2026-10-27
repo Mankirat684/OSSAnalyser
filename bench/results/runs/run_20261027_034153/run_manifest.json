@@ -1,0 +1,23 @@
+{
+  "runDirectory": "C:\\Users\\pvsra\\kirat\\ossAnalyser\\bench\\results\\runs\\run_20261027_034153",
+  "runStartedAt": "2026-10-26T22:11:53.178Z",
+  "resumedAt": "2026-10-26T23:23:41.151Z",
+  "gitCommit": "unknown",
+  "rubricVersion": "2.1.0",
+  "rubricSha256": "b70c1bb175d43f66813986e9e7eec16afb1923b7983d0b025f06a77866f29624",
+  "auditedGraderSha256": "14012af432594a45e7421940ed2e171ce0eefb00814328f172adc2be40069809",
+  "runnerSha256": "e4ce45bbe46fef8e68a866e0f8b3cfbd6a3ea0d8c57a7a9865fb57076fb945f2",
+  "agentModel": "gemini-3.5-flash-lite",
+  "evaluatorModel": "gemini-3.5-flash-lite",
+  "evaluatorTemperature": 0.1,
+  "taskCount": 6,
+  "goldFactCount": 27,
+  "repetitionsCount": 3,
+  "totalExpectedSessions": 54,
+  "arms": [
+    "baseline",
+    "graphify",
+    "oss_analyser"
+  ],
+  "sessionOrdering": "For rep in 1..repetitions: for task in tasks: for arm in [baseline, graphify, oss_analyser]"
+}

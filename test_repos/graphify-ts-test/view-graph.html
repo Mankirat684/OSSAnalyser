@@ -1,0 +1,78 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Graphify Graph Viewer</title>
+  <script src="https://unpkg.com/cytoscape/dist/cytoscape.min.js"></script>
+  <style>
+    body { margin: 0; font-family: Arial, sans-serif; }
+    #toolbar { padding: 12px; background: #222; color: white; }
+    #cy { width: 100vw; height: calc(100vh - 50px); }
+  </style>
+</head>
+<body>
+  <div id="toolbar">Graphify Graph Viewer — drag nodes, scroll to zoom</div>
+  <div id="cy"></div>
+
+  <script>
+    fetch("./graphify-out/graph.json")
+      .then(r => {
+        if (!r.ok) throw new Error("Could not load graph.json");
+        return r.json();
+      })
+      .then(graph => {
+        const elements = [
+          ...graph.nodes.map(n => ({
+            data: { id: n.id, label: n.label, file: n.source_file }
+          })),
+          ...graph.edges.map((e, i) => ({
+            data: {
+              id: "edge-" + i,
+              source: e.source,
+              target: e.target,
+              label: e.relation
+            }
+          }))
+        ];
+
+        cytoscape({
+          container: document.getElementById("cy"),
+          elements,
+          style: [
+            {
+              selector: "node",
+              style: {
+                "label": "data(label)",
+                "font-size": 10,
+                "text-wrap": "wrap",
+                "text-max-width": 110,
+                "background-color": "#4387d6",
+                "color": "#222",
+                "text-valign": "bottom",
+                "text-margin-y": 5
+              }
+            },
+            {
+              selector: "edge",
+              style: {
+                "width": 1.5,
+                "line-color": "#aaa",
+                "target-arrow-color": "#aaa",
+                "target-arrow-shape": "triangle",
+                "curve-style": "bezier",
+                "label": "data(label)",
+                "font-size": 7,
+                "text-rotation": "autorotate"
+              }
+            }
+          ],
+          layout: { name: "cose", animate: false, padding: 30 }
+        });
+      })
+      .catch(err => {
+        document.body.innerHTML = "<pre>Error: " + err.message + "</pre>";
+      });
+  </script>
+</body>
+</html>

@@ -1,0 +1,53 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build Outputs
+dist/
+build/
+*.tsbuildinfo
+
+# Environment & Credentials
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+!.env.example
+
+# Database & Cache Data (Docker mounts)
+postgres_data/
+redis_data/
+*.rdb
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+.pnpm-debug.log*
+
+# OS & Editor Files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Temporary & Testing artifacts
+coverage/
+.nyc_output/
+.turbo/
+
+# Graphify tool cache outputs (keep test input files, ignore generated caches)
+test_repos/**/graphify-out/cache/
+graphify-out/
+**/graphify-out/**
+.oss-analyser/

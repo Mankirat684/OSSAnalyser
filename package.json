@@ -1,0 +1,91 @@
+{
+  "name": "ossanalyser",
+  "version": "1.0.0",
+  "description": "Local-first codebase intelligence graph, AST call-graph extractor, and MCP server for AI coding agents",
+  "main": "./dist/index.js",
+  "type": "module",
+  "bin": {
+    "ossanalyser": "./dist/cli/index.js",
+    "oss-analyser": "./dist/cli/index.js"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "code-intelligence",
+    "call-graph",
+    "ast",
+    "sqlite-vec",
+    "codebase-summarization",
+    "antigravity",
+    "claude-code",
+    "cursor"
+  ],
+  "license": "MIT",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc && node -e \"const fs=require('fs'); fs.mkdirSync('dist/storage/sqlite/migrations', {recursive:true}); fs.copyFileSync('src/storage/sqlite/schema.sql', 'dist/storage/sqlite/schema.sql'); fs.readdirSync('src/storage/sqlite/migrations').forEach(f => fs.copyFileSync('src/storage/sqlite/migrations/'+f, 'dist/storage/sqlite/migrations/'+f)); fs.mkdirSync('dist/modules/storage', {recursive:true}); fs.copyFileSync('src/modules/storage/schema.sql', 'dist/modules/storage/schema.sql');\"",
+    "db:init": "tsx src/modules/storage/initDb.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:push": "drizzle-kit push",
+    "db:studio": "drizzle-kit studio",
+    "cli": "tsx src/cli/index.ts",
+    "prepublishOnly": "npm run build",
+    "test": "tsx tests/analyzer.test.ts && tsx tests/summarizer.test.ts",
+    "test:analyzer": "tsx tests/analyzer.test.ts",
+    "test:summarizer": "tsx tests/summarizer.test.ts",
+    "test:queue": "tsx tests/queue.test.ts",
+    "test:db": "tsx tests/database.test.ts",
+    "test:auth": "tsx tests/auth.test.ts",
+    "test:checkpoint": "tsx tests/checkpoint.test.ts",
+    "test:drizzle": "tsx tests/drizzle.test.ts",
+    "test:parity": "tsx tests/sqlite_parity.test.ts",
+    "test:sqlite": "tsx tests/sqlite_parity.test.ts && tsx tests/sqlite_store.test.ts && tsx tests/incremental_index.test.ts",
+    "test:mcp": "tsx tests/mcp_server.test.ts",
+    "test:phase3": "tsx tests/summarizer_phase3.test.ts",
+    "test:retrieval": "tsx tests/retrieval_eval.test.ts",
+    "test:graphify": "tsx tests/graphify_adapter.test.ts",
+    "test:migrations": "tsx tests/sqlite_migrations.test.ts",
+    "test:sync": "tsx tests/sync_export.test.ts",
+    "test:regressions": "tsx tests/extractor_regressions.test.ts",
+    "bench": "tsx bench/benchmark.ts",
+    "bench:onboarding": "tsx bench/onboardingBenchmark.ts",
+    "bench:external": "tsx bench/externalBenchmark.ts",
+    "bench:crosstool": "tsx bench/crosstoolRunner.ts",
+    "embed": "tsx scripts/generate_embeddings.ts"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.6.5",
+    "@types/pg": "^8.23.1",
+    "drizzle-kit": "^0.31.11",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "@google/genai": "^2.30.0",
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "@supabase/supabase-js": "^2.118.0",
+    "@types/better-sqlite3": "^9.6.0",
+    "@xenova/transformers": "^2.17.2",
+    "better-sqlite3": "^13.0.3",
+    "bullmq": "^6.3.17",
+    "commander": "^15.0.0",
+    "cors": "^2.8.6",
+    "dotenv": "^18.0.8",
+    "drizzle-orm": "^0.45.4",
+    "express": "^5.3.0",
+    "ioredis": "^6.0.0",
+    "pg": "^8.23.1",
+    "sqlite-vec": "^0.1.9",
+    "zod": "^4.6.7"
+  },
+  "allowScripts": {
+    "better-sqlite3@13.0.3": true,
+    "sqlite-vec@0.1.9": true
+  }
+}

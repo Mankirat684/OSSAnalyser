@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "oss-analyser": {
+      "command": "npx",
+      "args": [
+        "tsx",
+        "src/cli/index.ts",
+        "serve"
+      ]
+    }
+  }
+}
