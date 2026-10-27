@@ -20,7 +20,7 @@ build/
 postgres_data/
 redis_data/
 *.rdb
-
+bench_repos/
 # Logs
 logs/
 *.log
