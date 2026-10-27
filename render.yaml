@@ -1,0 +1,37 @@
+services:
+  - type: web
+    name: oss-analyser
+    runtime: node
+    plan: free
+    region: oregon
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: IS_HOSTED_DEMO
+        value: "true"
+      - key: ADMIN_INGEST_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: oss-analyser-db
+          property: connectionString
+      - key: DATABASE_SSL
+        value: "true"
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+
+databases:
+  - name: oss-analyser-db
+    plan: free
+    databaseName: ossanalyser
+    user: ossanalyser_user

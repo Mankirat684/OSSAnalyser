@@ -793,7 +793,7 @@ export async function runFullBenchmark(options?: BenchmarkRunnerOptions): Promis
     tasks = requestedIds.map((id) => allRubricTasks.find((t) => t.id === id)!);
   }
 
-  const repetitions = options?.repetitions || parseInt(process.env.BENCH_REPETITIONS || "3", 10) || 3;
+  const repetitions = options?.repetitions || parseInt(process.env.BENCH_REPETITIONS || "1", 10) || 1;
   const arms: Array<"baseline" | "graphify" | "oss_analyser"> = ["baseline", "graphify", "oss_analyser"];
   const totalExpectedSessions = repetitions * tasks.length * arms.length;
 
@@ -847,7 +847,7 @@ export async function runFullBenchmark(options?: BenchmarkRunnerOptions): Promis
   console.log(`  Configurations:`);
   console.log(`    Arm 1: Baseline Floor (grep, read_file, list_dir)`);
   console.log(`    Arm 2: Baseline + Graphify (query_graph BFS/DFS)`);
-  console.log(`    Arm 3: Baseline + OSS Analyser (query_code_graph AST + Graph)`);
+  console.log(`    Arm 3: Baseline + OSS Analyser (query_code_graph Hybrid RRF: BM25 + sqlite-vec + AST Graph)`);
   console.log(`  Model         : ${MODEL_NAME}`);
   console.log(`  Target Repo   : encode/starlette`);
   console.log(`  Questions (n) : ${tasks.length}`);

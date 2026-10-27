@@ -25,7 +25,7 @@
     "dist"
   ],
   "scripts": {
-    "start": "tsx src/index.ts",
+    "start": "node dist/index.js",
     "dev": "tsx watch src/index.ts",
     "build": "tsc && node -e \"const fs=require('fs'); fs.mkdirSync('dist/storage/sqlite/migrations', {recursive:true}); fs.copyFileSync('src/storage/sqlite/schema.sql', 'dist/storage/sqlite/schema.sql'); fs.readdirSync('src/storage/sqlite/migrations').forEach(f => fs.copyFileSync('src/storage/sqlite/migrations/'+f, 'dist/storage/sqlite/migrations/'+f)); fs.mkdirSync('dist/modules/storage', {recursive:true}); fs.copyFileSync('src/modules/storage/schema.sql', 'dist/modules/storage/schema.sql');\"",
     "db:init": "tsx src/modules/storage/initDb.ts",

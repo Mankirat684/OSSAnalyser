@@ -377,7 +377,7 @@ function updateChatHeader(threadTitle) {
     btnGraph.style.display = repo ? "inline-flex" : "none";
   }
   if (btnSumm) {
-    btnSumm.style.display = repo ? "inline-flex" : "none";
+    btnSumm.style.display = repo && !isHostedDemoServer ? "inline-flex" : "none";
   }
 }
 
@@ -392,6 +392,26 @@ function renderWelcomeEmptyState() {
         <div class="welcome-icon"><i class="fa-solid fa-comments"></i></div>
         <h3>Codebase Q&A Copilot</h3>
         <p>Select a project from the left sidebar to start chatting about its architecture, functions, and blast radius impact.</p>
+      </div>
+    `;
+    return;
+  }
+
+  if (isHostedDemoServer) {
+    chatBox.innerHTML = `
+      <div class="chat-welcome-state">
+        <div class="welcome-icon"><i class="fa-solid fa-diagram-project" style="color: var(--primary);"></i></div>
+        <h3>${escapeHtml(repo.name)} Architecture Explorer</h3>
+        <p style="margin-bottom: 16px;">This repository is fully indexed with hierarchical AST code graphs, symbol signatures, and transitive blast radius impact calculations.</p>
+        <div style="background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 8px; padding: 12px 16px; margin: 0 auto 16px; max-width: 520px; font-size: 0.85rem; color: #93c5fd; text-align: left;">
+          <div style="font-weight: 600; margin-bottom: 4px;"><i class="fa-solid fa-circle-info"></i> Public Demo Mode</div>
+          AI Copilot queries and summarization are paused on this hosted demo to protect API quota. You have full interactive access to explore the code graph!
+        </div>
+        <div style="display: flex; gap: 8px; justify-content: center;">
+          <button class="btn btn-primary" onclick="switchToGraphView()">
+            <i class="fa-solid fa-circle-nodes"></i> Explore Interactive Code Graph
+          </button>
+        </div>
       </div>
     `;
     return;
@@ -809,6 +829,11 @@ function renderMessageHtml(role, content, referencedNodes, blastRadius) {
 }
 
 async function sendChat() {
+  if (isHostedDemoServer) {
+    alert("AI Copilot queries are paused on this public demo to protect Gemini API quota. Feel free to explore the interactive code graph, AST relationships, and blast radius calculations!");
+    return;
+  }
+
   if (!currentRepoId) {
     alert("Please select or ingest a repository first.");
     return;
@@ -907,9 +932,22 @@ async function checkServerConfig() {
       isHostedDemoServer = Boolean(data.isHostedDemo);
       const demoNotice = document.getElementById("demo-mode-notice");
       const adminGroup = document.getElementById("group-admin-key");
+      const sidebarIngestBtn = document.getElementById("btn-sidebar-ingest");
+      const chatInput = document.getElementById("chat-input");
+      const chatDisclaimer = document.querySelector(".chat-disclaimer");
+
       if (isHostedDemoServer) {
         if (demoNotice) demoNotice.style.display = "block";
         if (adminGroup) adminGroup.style.display = "block";
+        if (sidebarIngestBtn) sidebarIngestBtn.style.display = "none";
+        if (chatInput) {
+          chatInput.placeholder = "AI Copilot queries are disabled on this demo — click 'View Code Graph' to explore codebase architecture";
+        }
+        if (chatDisclaimer) {
+          chatDisclaimer.innerHTML = `<span style="color: #60a5fa;"><i class="fa-solid fa-circle-info"></i> Public Demo Mode: Read access enabled. Copilot queries and summarization are paused to protect API quota.</span>`;
+        }
+      } else {
+        if (sidebarIngestBtn) sidebarIngestBtn.style.display = "block";
       }
     }
   } catch {
@@ -1493,6 +1531,7 @@ async function revokeKey(id) {
 // -----------------------------------------------------------------------------
 
 window.onload = async () => {
+  await checkServerConfig();
   updateAuthUI();
   await loadRepositoriesList();
 };

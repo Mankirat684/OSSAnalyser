@@ -1,9 +1,21 @@
 import { Router, Request, Response } from "express";
 import { pool } from "../../config/database.js";
 import { CodebaseCopilot } from "../../modules/copilot/index.js";
+import { config } from "../../config/env.js";
 
 const router = Router();
 const copilot = new CodebaseCopilot();
+
+function checkAdminAuthorization(req: Request): boolean {
+  if (!config.hostedDemo.isHostedDemo) return true;
+  const adminKey = (req.headers["x-admin-key"] as string) || req.body?.adminKey;
+  const authHeader = req.headers.authorization;
+  return Boolean(
+    config.hostedDemo.adminIngestKey &&
+    ((adminKey && adminKey === config.hostedDemo.adminIngestKey) ||
+      (authHeader && authHeader.includes(config.hostedDemo.adminIngestKey)))
+  );
+}
 
 /**
  * GET /api/repos/:repoId/threads
@@ -88,6 +100,15 @@ router.get("/:repoId/threads/:threadId/messages", async (req: Request, res: Resp
  * Sends a message in a thread, runs RAG with prior turn history, and persists the response.
  */
 router.post("/:repoId/threads/:threadId/messages", async (req: Request, res: Response) => {
+  // Demo Mode: Block Gemini API calls for unauthenticated/demo visitors
+  if (config.hostedDemo.isHostedDemo && !checkAdminAuthorization(req)) {
+    return res.status(403).json({
+      error: "Copilot Disabled in Demo Mode",
+      message:
+        "AI Copilot queries are disabled on this hosted demo to protect Gemini API quota. Feel free to explore the interactive code graph, AST relationships, contract summaries, and blast radius calculations!"
+    });
+  }
+
   try {
     const repoId = String(req.params.repoId);
     const threadId = String(req.params.threadId);
@@ -193,6 +214,15 @@ router.delete("/:repoId/threads/:threadId", async (req: Request, res: Response) 
  * Backwards-compatible POST /api/repos/:repoId/chat
  */
 router.post("/:repoId/chat", async (req: Request, res: Response) => {
+  // Demo Mode: Block Gemini API calls for unauthenticated/demo visitors
+  if (config.hostedDemo.isHostedDemo && !checkAdminAuthorization(req)) {
+    return res.status(403).json({
+      error: "Copilot Disabled in Demo Mode",
+      message:
+        "AI Copilot queries are disabled on this hosted demo to protect Gemini API quota. Feel free to explore the interactive code graph, AST relationships, contract summaries, and blast radius calculations!"
+    });
+  }
+
   try {
     const repoId = String(req.params.repoId);
     const { question, history } = req.body;
