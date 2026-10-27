@@ -30,8 +30,9 @@ async function main() {
     console.log(`✓ sqlite-vec loaded successfully. Virtual table vec_nodes ready.`);
   }
 
+  const firstRepo = await store.getFirstRepository();
   const repoName = path.basename(targetRepo);
-  const repoId = `repo_${repoName.replace(/[^a-zA-Z0-9_]/g, "_")}`;
+  const repoId = firstRepo?.id || `repo_${repoName.replace(/[^a-zA-Z0-9_]/g, "_")}`;
 
   const provider = new LocalOnnxEmbeddingProvider();
   console.log(`Model       : ${provider.model} (${provider.dims} dimensions)`);
@@ -44,12 +45,8 @@ async function main() {
   const count = await engine.embedNodes(store, repoId, provider, true);
   const duration = ((Date.now() - startTime) / 1000).toFixed(1);
 
-  // Check rows in vec_nodes
-  let persistedCount = 0;
-  try {
-    const row = store.db.prepare("SELECT count(*) as c FROM vec_nodes").get() as any;
-    persistedCount = row.c;
-  } catch {}
+  // Check rows in vec_nodes via public SQLiteStore method
+  const persistedCount = store.getVecCount();
 
   console.log(`\n✓ Embedding Generation Complete!`);
   console.log(`  • Nodes Processed   : ${count}`);

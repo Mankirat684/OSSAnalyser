@@ -639,23 +639,75 @@ export class RepositoryStore {
   }
 
   /**
-   * Retrieves all nodes and edges formatted for Cytoscape.js.
+   * Retrieves nodes and edges formatted for Cytoscape.js with adaptive capping to protect server & browser.
    */
-  public static async getGraphElements(repoId: string): Promise<{
+  public static async getGraphElements(
+    repoId: string,
+    limit = 600
+  ): Promise<{
     nodes: Array<{ data: Record<string, unknown> }>;
     edges: Array<{ data: Record<string, unknown> }>;
+    totalNodesCount: number;
+    isCapped: boolean;
   }> {
-    const nodesRes = await pool.query(
-      `SELECT id, name, file_path, node_type, level, summary FROM code_nodes WHERE repo_id = $1`,
+    // 1. Get total count
+    const countRes = await pool.query(
+      `SELECT COUNT(*)::int as count FROM code_nodes WHERE repo_id = $1`,
       [repoId]
     );
+    const totalNodesCount = countRes.rows[0]?.count || 0;
+    const isCapped = totalNodesCount > limit;
 
+    // 2. Query nodes: if total > limit, prioritize files, classes, and top-degree connected symbols
+    let nodesQuery: string;
+    let params: any[];
+
+    if (isCapped) {
+      nodesQuery = `
+        WITH degree_counts AS (
+          SELECT node_id, COUNT(*) as deg
+          FROM (
+            SELECT source_id as node_id FROM code_edges WHERE repo_id = $1
+            UNION ALL
+            SELECT target_id as node_id FROM code_edges WHERE repo_id = $1
+          ) sub
+          GROUP BY node_id
+        )
+        SELECT n.id, n.name, n.file_path, n.node_type, n.level, n.summary
+        FROM code_nodes n
+        LEFT JOIN degree_counts d ON d.node_id = n.id
+        WHERE n.repo_id = $1
+        ORDER BY
+          CASE
+            WHEN n.node_type IN ('file', 'module', 'class') THEN 1
+            ELSE 2
+          END ASC,
+          COALESCE(d.deg, 0) DESC,
+          n.id ASC
+        LIMIT $2
+      `;
+      params = [repoId, limit];
+    } else {
+      nodesQuery = `SELECT id, name, file_path, node_type, level, summary FROM code_nodes WHERE repo_id = $1`;
+      params = [repoId];
+    }
+
+    const nodesRes = await pool.query(nodesQuery, params);
+    const validNodeIds = new Set(nodesRes.rows.map((r) => r.id));
+
+    // 3. Query edges and strictly filter to edges connecting returned nodes
     const edgesRes = await pool.query(
       `SELECT id, source_id, target_id, relation FROM code_edges WHERE repo_id = $1`,
       [repoId]
     );
 
+    const validEdges = edgesRes.rows.filter(
+      (e) => validNodeIds.has(e.source_id) && validNodeIds.has(e.target_id)
+    );
+
     return {
+      totalNodesCount,
+      isCapped,
       nodes: nodesRes.rows.map((r) => ({
         data: {
           id: r.id,
@@ -666,7 +718,7 @@ export class RepositoryStore {
           summary: r.summary
         }
       })),
-      edges: edgesRes.rows.map((e) => ({
+      edges: validEdges.map((e) => ({
         data: {
           id: `edge_${e.id}`,
           source: e.source_id,

@@ -55,7 +55,8 @@
     "bench:onboarding": "tsx bench/onboardingBenchmark.ts",
     "bench:external": "tsx bench/externalBenchmark.ts",
     "bench:crosstool": "tsx bench/crosstoolRunner.ts",
-    "embed": "tsx scripts/generate_embeddings.ts"
+    "embed": "tsx scripts/generate_embeddings.ts",
+    "sync:render": "tsx scripts/sync_postgres.ts"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",

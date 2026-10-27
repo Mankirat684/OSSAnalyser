@@ -205,9 +205,24 @@
               <div class="inspector-title" id="node-name"></div>
               <div class="inspector-path" id="node-file"></div>
 
+              <div id="node-sig-card" class="card" style="display: none; padding: 10px 12px; background: rgba(59, 130, 246, 0.08); border-left: 3px solid var(--primary); margin-bottom: 12px;">
+                <div style="font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.5px; color: var(--primary); font-weight: 600; margin-bottom: 4px;">Signature</div>
+                <code id="node-sig" style="font-size: 0.8rem; color: #93c5fd; font-family: monospace; word-break: break-all;"></code>
+              </div>
+
               <div class="card">
-                <div class="card-title"><i class="fa-solid fa-sparkles" style="color: var(--primary);"></i> Gemini Hierarchical Summary</div>
-                <p id="node-summary"></p>
+                <div class="card-title"><i class="fa-solid fa-sparkles" style="color: var(--primary);"></i> Contract & Summary</div>
+                <p id="node-summary" style="line-height: 1.5; color: var(--text-main); font-size: 0.84rem;"></p>
+              </div>
+
+              <div class="card" id="card-callers" style="display: none;">
+                <div class="card-title"><i class="fa-solid fa-arrow-right-to-bracket" style="color: #38bdf8;"></i> Direct Callers (<span id="count-callers">0</span>)</div>
+                <div id="node-callers" style="display: flex; flex-direction: column; gap: 4px; max-height: 160px; overflow-y: auto;"></div>
+              </div>
+
+              <div class="card" id="card-callees" style="display: none;">
+                <div class="card-title"><i class="fa-solid fa-arrow-right-from-bracket" style="color: #a855f7;"></i> Direct Calls (<span id="count-callees">0</span>)</div>
+                <div id="node-callees" style="display: flex; flex-direction: column; gap: 4px; max-height: 160px; overflow-y: auto;"></div>
               </div>
 
               <div class="card">

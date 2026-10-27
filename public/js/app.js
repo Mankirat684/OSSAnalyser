@@ -520,6 +520,49 @@ function showEmptyState(show) {
 // Cytoscape Dependency Graph Explorer
 // -----------------------------------------------------------------------------
 
+// -----------------------------------------------------------------------------
+// Adaptive Graph Physics & Layout Config
+// -----------------------------------------------------------------------------
+
+function getAdaptiveLayoutConfig(nodeCount) {
+  // Clamped node count to bound scaling and prevent server/browser crashes
+  const count = Math.min(Math.max(nodeCount, 15), 600);
+
+  // Dynamic node repulsion: pushes nodes apart proportionally to density to prevent overlapping
+  const nodeRepulsion = Math.min(60000, Math.max(5000, 4000 + count * 80));
+
+  // Dynamic ideal edge length: gives nodes breathing room
+  const idealEdgeLength = Math.min(180, Math.max(55, 45 + Math.sqrt(count) * 5.5));
+
+  // Dynamic canvas bounding box: expands 2D physics space so dense clusters don't knot
+  const boxDim = Math.min(5000, Math.max(1400, 1100 + Math.sqrt(count) * 150));
+
+  // Iterations: capped on larger graphs to complete in < 600ms without freezing UI
+  const numIter = count > 350 ? 350 : count > 200 ? 500 : 700;
+
+  // Gravity: low gravity prevents central clumping into a giant ball
+  const gravity = count > 300 ? 0.08 : count > 100 ? 0.14 : 0.22;
+
+  return {
+    name: "cose",
+    animate: false,
+    fit: true,
+    padding: 60,
+    nodeDimensionsIncludeLabels: true, // Prevents text collisions!
+    nodeOverlap: 30,                   // Discourages node overlapping
+    idealEdgeLength: () => idealEdgeLength,
+    nodeRepulsion: () => nodeRepulsion,
+    edgeElasticity: () => 32,          // Softer spring tension
+    gravity: gravity,
+    componentSpacing: 140,             // Keeps disconnected files/modules well separated
+    numIter: numIter,
+    initialTemp: 220,
+    coolingFactor: 0.95,
+    minTemp: 1.0,
+    boundingBox: { x1: 0, y1: 0, w: boxDim, h: boxDim }
+  };
+}
+
 async function loadGraph() {
   if (!currentRepoId) {
     showEmptyState(true);
@@ -527,7 +570,7 @@ async function loadGraph() {
   }
 
   try {
-    const res = await fetch(`/api/repos/${currentRepoId}/graph`, {
+    const res = await fetch(`/api/repos/${encodeURIComponent(currentRepoId)}/graph`, {
       headers: getAuthHeaders()
     });
 
@@ -545,6 +588,23 @@ async function loadGraph() {
 
     showEmptyState(false);
 
+    const nodeCount = graph.nodes.length;
+    const nodeSize = nodeCount > 350 ? 20 : nodeCount > 120 ? 26 : 32;
+    const fontSize = nodeCount > 350 ? 9 : nodeCount > 120 ? 10 : 11;
+    const maxTextWidth = Math.min(120, Math.max(65, Math.floor(1400 / Math.sqrt(nodeCount))));
+
+    const nodeIds = new Set(graph.nodes.map((n) => n.data.id));
+    const validEdges = (graph.edges || []).filter(
+      (e) => nodeIds.has(e.data.source) && nodeIds.has(e.data.target)
+    );
+
+    const repo = repositoriesData.find((r) => r.id === currentRepoId);
+    const graphHeading = document.getElementById("graph-repo-heading");
+    if (graphHeading && repo) {
+      const capText = graph.isCapped ? ` (Showing top ${nodeCount} of ${graph.totalNodesCount} symbols)` : ` (${nodeCount} symbols, ${validEdges.length} calls)`;
+      graphHeading.innerHTML = `<span>${escapeHtml(repo.name)}</span> <small style="color: var(--text-muted); font-weight: normal;">${capText}</small>`;
+    }
+
     const elements = [
       ...graph.nodes.map((n) => ({
         data: {
@@ -554,10 +614,12 @@ async function loadGraph() {
               ? "#3b82f6"
               : n.data.nodeType === "file"
               ? "#10b981"
+              : n.data.nodeType === "class"
+              ? "#a855f7"
               : "#f59e0b"
         }
       })),
-      ...graph.edges
+      ...validEdges
     ];
 
     cy = cytoscape({
@@ -568,29 +630,34 @@ async function loadGraph() {
           selector: "node",
           style: {
             label: "data(label)",
-            "font-size": 11,
-            "text-wrap": "wrap",
-            "text-max-width": 120,
+            width: nodeSize,
+            height: nodeSize,
+            "font-size": fontSize,
+            "text-wrap": "ellipsis",
+            "text-max-width": maxTextWidth,
             "background-color": "data(color)",
             color: "#f8fafc",
             "text-valign": "bottom",
-            "text-margin-y": 6,
+            "text-margin-y": 4,
             "border-width": 2,
             "border-color": "#1e293b"
           }
         },
         {
-          selector: "node:selected",
+          selector: "node:selected, node.selected-node",
           style: {
             "border-width": 4,
             "border-color": "#ffffff",
-            "background-color": "#60a5fa"
+            "background-color": "#38bdf8",
+            "shadow-blur": 12,
+            "shadow-color": "#38bdf8",
+            "shadow-opacity": 0.8
           }
         },
         {
           selector: "edge",
           style: {
-            width: 2,
+            width: 1.5,
             "line-color": "#475569",
             "target-arrow-color": "#475569",
             "target-arrow-shape": "triangle",
@@ -606,7 +673,10 @@ async function loadGraph() {
           style: {
             "background-color": "#ef4444 !important",
             "border-color": "#fca5a5 !important",
-            "border-width": 3
+            "border-width": 3,
+            "shadow-blur": 10,
+            "shadow-color": "#ef4444",
+            "shadow-opacity": 0.7
           }
         },
         {
@@ -618,16 +688,20 @@ async function loadGraph() {
           }
         }
       ],
-      layout: {
-        name: "cose",
-        animate: false,
-        padding: 40
-      }
+      layout: getAdaptiveLayoutConfig(nodeCount)
     });
 
     cy.on("tap", "node", async (evt) => {
       const node = evt.target;
       selectNode(node.data("id"));
+    });
+
+    // Unselect when clicking on background
+    cy.on("tap", (evt) => {
+      if (evt.target === cy) {
+        resetHighlights();
+        resetInspector();
+      }
     });
   } catch (err) {
     console.error("Failed to load graph:", err);
@@ -672,82 +746,167 @@ function resetInspector() {
   const details = document.getElementById("inspector-details");
   if (placeholder) placeholder.style.display = "block";
   if (details) details.style.display = "none";
+  if (cy) {
+    cy.nodes().removeClass("selected-node");
+    cy.elements().removeClass("highlight-blast");
+  }
 }
 
 async function selectNode(nodeId) {
-  if (!cy || !currentRepoId) return;
+  if (!cy || !currentRepoId || !nodeId) return;
 
-  switchTab("inspector");
-  document.getElementById("inspector-placeholder").style.display = "none";
-  document.getElementById("inspector-details").style.display = "block";
+  const placeholder = document.getElementById("inspector-placeholder");
+  const details = document.getElementById("inspector-details");
+  if (placeholder) placeholder.style.display = "none";
+  if (details) details.style.display = "block";
 
-  // Center on node in graph
-  const targetNode = cy.$(`#${nodeId}`);
-  if (targetNode.length > 0) {
-    cy.nodes().unselect();
-    targetNode.select();
+  // Center & highlight node in graph using exact ID lookup
+  const targetNode = cy.getElementById(nodeId);
+  cy.nodes().removeClass("selected-node");
+  if (targetNode && targetNode.length > 0) {
+    targetNode.addClass("selected-node");
     cy.animate({
       center: { eles: targetNode },
-      duration: 300
+      zoom: Math.max(cy.zoom(), 0.9),
+      duration: 350
     });
   }
 
   try {
-    const res = await fetch(`/api/repos/${currentRepoId}/nodes/${nodeId}`, {
+    const res = await fetch(`/api/repos/${encodeURIComponent(currentRepoId)}/nodes/${encodeURIComponent(nodeId)}`, {
       headers: getAuthHeaders()
     });
 
     if (!res.ok) {
-      console.warn("Failed to fetch node details:", res.statusText);
+      console.warn("Failed to fetch node details:", res.status, res.statusText);
       return;
     }
 
     const data = await res.json();
+    if (!data || !data.node) return;
 
-    document.getElementById("node-name").innerText = data.node.name;
+    // 1. Title & File Info
+    const nameEl = document.getElementById("node-name");
+    if (nameEl) nameEl.textContent = data.node.name;
+
     const locText = data.node.startLine
       ? ` (Line ${data.node.startLine}${data.node.startColumn ? `:${data.node.startColumn}` : ""}${
           data.node.endLine ? `–${data.node.endLine}${data.node.endColumn ? `:${data.node.endColumn}` : ""}` : ""
         })`
       : "";
-    document.getElementById("node-file").innerText = `${data.node.filePath}${locText}`;
-    document.getElementById("node-summary").innerText = data.node.summary;
-    document.getElementById("node-code").innerText = data.node.rawCode || "// No raw code snippet available";
+    const fileEl = document.getElementById("node-file");
+    if (fileEl) fileEl.textContent = `${data.node.filePath}${locText}`;
 
-    // Ownership Breakdown
-    const ownerEl = document.getElementById("node-ownership");
-    ownerEl.innerHTML = "";
-    if (data.ownership && data.ownership.length > 0) {
-      data.ownership.forEach((o) => {
-        ownerEl.innerHTML += `
-          <div class="ownership-item">
-            <span><b>${o.authorName}</b> (${o.authorEmail})</span>
-            <span>${o.ownershipPercentage}% (${o.linesAuthored} lines, ${o.totalCommits || 1} commits)</span>
-          </div>
-          <div class="ownership-bar"><div class="ownership-fill" style="width: ${o.ownershipPercentage}%"></div></div>
-        `;
-      });
-    } else {
-      ownerEl.innerHTML = "<p style='color: var(--text-muted); font-size: 0.82rem;'>No git blame records available for this range.</p>";
+    // 2. Signature Card
+    const sigCard = document.getElementById("node-sig-card");
+    const sigEl = document.getElementById("node-sig");
+    if (sigCard && sigEl) {
+      if (data.node.signature && data.node.signature.trim()) {
+        sigEl.textContent = data.node.signature.trim();
+        sigCard.style.display = "block";
+      } else {
+        sigCard.style.display = "none";
+      }
     }
 
-    // Blast Radius Impact
-    const blastEl = document.getElementById("node-blast-radius");
-    blastEl.innerHTML = "";
-    cy.elements().removeClass("highlight-blast");
+    // 3. Contract & Summary
+    const summaryEl = document.getElementById("node-summary");
+    if (summaryEl) {
+      const summaryText = data.node.summary && data.node.summary !== "pending_summary"
+        ? data.node.summary
+        : "AST contract verified. Summary pending.";
+      summaryEl.textContent = summaryText;
+    }
 
-    if (data.blastRadius && data.blastRadius.length > 0) {
-      data.blastRadius.forEach((b) => {
-        blastEl.innerHTML += `
-          <div class="blast-item" style="cursor: pointer;" onclick="selectNode('${b.id}')">
-            <span>💥 <b>${b.name}</b> (${b.filePath})</span>
-            <span class="badge" style="background:#ef444433; color:#fca5a5;">Depth ${b.depth}</span>
-          </div>
-        `;
-        cy.$(`#${b.id}`).addClass("highlight-blast");
-      });
-    } else {
-      blastEl.innerHTML = "<p style='color: var(--text-muted); font-size: 0.82rem;'>No downstream callers impacted (Leaf node or entry point).</p>";
+    // 4. Direct Callers
+    const callersCard = document.getElementById("card-callers");
+    const callersEl = document.getElementById("node-callers");
+    const callersCount = document.getElementById("count-callers");
+    if (callersCard && callersEl && callersCount) {
+      if (data.callers && data.callers.length > 0) {
+        callersCount.textContent = String(data.callers.length);
+        callersEl.innerHTML = data.callers
+          .map(
+            (c) => `
+          <div class="blast-item" style="cursor: pointer; padding: 6px 8px; border-radius: 6px; background: rgba(56, 189, 248, 0.08); margin-bottom: 4px;" onclick="selectNode('${escapeHtml(c.id)}')">
+            <span>↳ <b>${escapeHtml(c.name)}</b> <small style="opacity: 0.65;">(${escapeHtml(c.filePath)})</small></span>
+          </div>`
+          )
+          .join("");
+        callersCard.style.display = "block";
+      } else {
+        callersCard.style.display = "none";
+      }
+    }
+
+    // 5. Direct Callees (Calls)
+    const calleesCard = document.getElementById("card-callees");
+    const calleesEl = document.getElementById("node-callees");
+    const calleesCount = document.getElementById("count-callees");
+    if (calleesCard && calleesEl && calleesCount) {
+      if (data.callees && data.callees.length > 0) {
+        calleesCount.textContent = String(data.callees.length);
+        calleesEl.innerHTML = data.callees
+          .map(
+            (c) => `
+          <div class="blast-item" style="cursor: pointer; padding: 6px 8px; border-radius: 6px; background: rgba(168, 85, 247, 0.08); margin-bottom: 4px;" onclick="selectNode('${escapeHtml(c.id)}')">
+            <span>→ <b>${escapeHtml(c.name)}</b> <small style="opacity: 0.65;">(${escapeHtml(c.filePath)})</small></span>
+          </div>`
+          )
+          .join("");
+        calleesCard.style.display = "block";
+      } else {
+        calleesCard.style.display = "none";
+      }
+    }
+
+    // 6. Raw Code Snippet
+    const codeEl = document.getElementById("node-code");
+    if (codeEl) {
+      codeEl.textContent = data.node.rawCode || "// No raw source code stored for this symbol";
+    }
+
+    // 7. Ownership Breakdown
+    const ownerEl = document.getElementById("node-ownership");
+    if (ownerEl) {
+      ownerEl.innerHTML = "";
+      if (data.ownership && data.ownership.length > 0) {
+        data.ownership.forEach((o) => {
+          ownerEl.innerHTML += `
+            <div class="ownership-item">
+              <span><b>${escapeHtml(o.authorName)}</b> (${escapeHtml(o.authorEmail)})</span>
+              <span>${o.ownershipPercentage}% (${o.linesAuthored} lines, ${o.totalCommits || 1} commits)</span>
+            </div>
+            <div class="ownership-bar"><div class="ownership-fill" style="width: ${Math.min(100, o.ownershipPercentage)}%"></div></div>
+          `;
+        });
+      } else {
+        ownerEl.innerHTML = "<p style='color: var(--text-muted); font-size: 0.82rem;'>No git blame records available for this range.</p>";
+      }
+    }
+
+    // 8. Blast Radius Impact
+    const blastEl = document.getElementById("node-blast-radius");
+    if (blastEl) {
+      blastEl.innerHTML = "";
+      cy.elements().removeClass("highlight-blast");
+
+      if (data.blastRadius && data.blastRadius.length > 0) {
+        data.blastRadius.forEach((b) => {
+          blastEl.innerHTML += `
+            <div class="blast-item" style="cursor: pointer; margin-bottom: 4px;" onclick="selectNode('${escapeHtml(b.id)}')">
+              <span>💥 <b>${escapeHtml(b.name)}</b> (${escapeHtml(b.filePath)})</span>
+              <span class="badge" style="background:#ef444433; color:#fca5a5;">Depth ${b.depth}</span>
+            </div>
+          `;
+          const blastNode = cy.getElementById(b.id);
+          if (blastNode && blastNode.length > 0) {
+            blastNode.addClass("highlight-blast");
+          }
+        });
+      } else {
+        blastEl.innerHTML = "<p style='color: var(--text-muted); font-size: 0.82rem;'>No downstream callers impacted (Leaf node or entry point).</p>";
+      }
     }
   } catch (err) {
     console.error("Failed to fetch node details:", err);
@@ -765,6 +924,7 @@ function resetHighlights() {
   if (cy) {
     cy.elements().removeClass("highlight-blast");
     cy.elements().removeClass("highlight-search");
+    cy.nodes().removeClass("selected-node");
     cy.nodes().unselect();
   }
   const searchInput = document.getElementById("node-search");
@@ -772,13 +932,28 @@ function resetHighlights() {
 }
 
 function setLayout(name) {
-  if (cy) {
+  if (!cy) return;
+  const nodeCount = cy.nodes().length;
+  if (name === "cose") {
+    const config = getAdaptiveLayoutConfig(nodeCount);
+    cy.layout({ ...config, animate: true, animationDuration: 600 }).run();
+  } else if (name === "breadthfirst") {
+    cy.layout({
+      name: "breadthfirst",
+      directed: true,
+      spacingFactor: Math.min(2.2, Math.max(1.1, 1.0 + Math.sqrt(nodeCount) * 0.04)),
+      animate: true,
+      animationDuration: 500,
+      avoidOverlap: true,
+      nodeDimensionsIncludeLabels: true
+    }).run();
+  } else {
     cy.layout({ name, animate: true, animationDuration: 500 }).run();
   }
 }
 
 function fitGraph() {
-  if (cy) cy.fit(null, 30);
+  if (cy) cy.fit(null, 40);
 }
 
 function switchTab(tab) {
