@@ -295,6 +295,7 @@ async function startNewChatForRepo(repoId) {
 }
 
 async function selectThread(threadId, repoId) {
+  if (window.innerWidth <= 768) toggleSidebar(false);
   currentRepoId = repoId;
   currentThreadId = threadId;
   localStorage.setItem("oss_active_repo", repoId);
@@ -472,15 +473,18 @@ function switchView(viewName) {
 }
 
 function switchToChatView() {
+  if (window.innerWidth <= 768) toggleSidebar(false);
   switchView("chat");
 }
 
 function switchToGraphView() {
+  if (window.innerWidth <= 768) toggleSidebar(false);
   switchView("graph");
   loadGraph();
 }
 
 async function viewGraphForRepo(repoId) {
+  if (window.innerWidth <= 768) toggleSidebar(false);
   currentRepoId = repoId;
   localStorage.setItem("oss_active_repo", repoId);
   renderSidebarProjects();
@@ -497,9 +501,42 @@ async function selectNodeInGraph(nodeId) {
   selectNode(nodeId);
 }
 
-function toggleSidebar() {
+function toggleSidebar(forceState) {
   const sidebar = document.getElementById("sidebar");
-  if (sidebar) sidebar.classList.toggle("open");
+  const backdrop = document.getElementById("sidebar-backdrop");
+  if (!sidebar) return;
+
+  const willOpen = typeof forceState === "boolean" ? forceState : !sidebar.classList.contains("open");
+  sidebar.classList.toggle("open", willOpen);
+  if (backdrop) backdrop.classList.toggle("active", willOpen);
+}
+
+function openInspector() {
+  const pane = document.getElementById("graph-inspector-pane");
+  const backdrop = document.getElementById("inspector-backdrop");
+  const toggleBtn = document.getElementById("btn-mobile-inspector-toggle");
+  if (pane) pane.classList.add("open");
+  if (backdrop) backdrop.classList.add("active");
+  if (toggleBtn) toggleBtn.classList.add("active");
+}
+
+function closeInspector() {
+  const pane = document.getElementById("graph-inspector-pane");
+  const backdrop = document.getElementById("inspector-backdrop");
+  const toggleBtn = document.getElementById("btn-mobile-inspector-toggle");
+  if (pane) pane.classList.remove("open");
+  if (backdrop) backdrop.classList.remove("active");
+  if (toggleBtn) toggleBtn.classList.remove("active");
+}
+
+function toggleInspector() {
+  const pane = document.getElementById("graph-inspector-pane");
+  if (!pane) return;
+  if (pane.classList.contains("open")) {
+    closeInspector();
+  } else {
+    openInspector();
+  }
 }
 
 function handleChatKeydown(event) {
@@ -640,18 +677,60 @@ async function loadGraph() {
             "text-valign": "bottom",
             "text-margin-y": 4,
             "border-width": 2,
-            "border-color": "#1e293b"
+            "border-color": "#1e293b",
+            transition: "opacity 0.2s ease, border-width 0.2s ease, background-color 0.2s ease"
           }
         },
         {
           selector: "node:selected, node.selected-node",
           style: {
             "border-width": 4,
-            "border-color": "#ffffff",
-            "background-color": "#38bdf8",
-            "shadow-blur": 12,
+            "border-color": "#ffffff !important",
+            "background-color": "#38bdf8 !important",
+            "shadow-blur": 16,
             "shadow-color": "#38bdf8",
-            "shadow-opacity": 0.8
+            "shadow-opacity": 0.9,
+            opacity: 1,
+            "z-index": 100
+          }
+        },
+        {
+          selector: "node.highlight-caller",
+          style: {
+            "background-color": "#0ea5e9 !important",
+            "border-color": "#7dd3fc !important",
+            "border-width": 3.5,
+            "shadow-blur": 14,
+            "shadow-color": "#0ea5e9",
+            "shadow-opacity": 0.85,
+            opacity: 1,
+            "z-index": 80
+          }
+        },
+        {
+          selector: "node.highlight-callee",
+          style: {
+            "background-color": "#a855f7 !important",
+            "border-color": "#d8b4fe !important",
+            "border-width": 3.5,
+            "shadow-blur": 14,
+            "shadow-color": "#a855f7",
+            "shadow-opacity": 0.85,
+            opacity: 1,
+            "z-index": 80
+          }
+        },
+        {
+          selector: "node.highlight-caller.highlight-callee",
+          style: {
+            "background-color": "#a855f7 !important",
+            "border-color": "#38bdf8 !important",
+            "border-width": 4,
+            "shadow-blur": 16,
+            "shadow-color": "#38bdf8",
+            "shadow-opacity": 0.9,
+            opacity: 1,
+            "z-index": 85
           }
         },
         {
@@ -665,7 +744,34 @@ async function loadGraph() {
             label: "data(label)",
             "font-size": 8,
             color: "#94a3b8",
-            "text-rotation": "autorotate"
+            "text-rotation": "autorotate",
+            transition: "opacity 0.2s ease, width 0.2s ease, line-color 0.2s ease"
+          }
+        },
+        {
+          selector: "edge.highlight-edge-incoming",
+          style: {
+            width: 3.5,
+            "line-color": "#38bdf8 !important",
+            "target-arrow-color": "#38bdf8 !important",
+            "arrow-scale": 1.4,
+            color: "#bae6fd",
+            "font-weight": 600,
+            opacity: 1,
+            "z-index": 70
+          }
+        },
+        {
+          selector: "edge.highlight-edge-outgoing",
+          style: {
+            width: 3.5,
+            "line-color": "#c084fc !important",
+            "target-arrow-color": "#c084fc !important",
+            "arrow-scale": 1.4,
+            color: "#e9d5ff",
+            "font-weight": 600,
+            opacity: 1,
+            "z-index": 70
           }
         },
         {
@@ -674,9 +780,11 @@ async function loadGraph() {
             "background-color": "#ef4444 !important",
             "border-color": "#fca5a5 !important",
             "border-width": 3,
-            "shadow-blur": 10,
+            "shadow-blur": 12,
             "shadow-color": "#ef4444",
-            "shadow-opacity": 0.7
+            "shadow-opacity": 0.8,
+            opacity: 1,
+            "z-index": 75
           }
         },
         {
@@ -684,7 +792,14 @@ async function loadGraph() {
           style: {
             "border-color": "#38bdf8 !important",
             "border-width": 4,
-            "background-color": "#0284c7 !important"
+            "background-color": "#0284c7 !important",
+            opacity: 1
+          }
+        },
+        {
+          selector: ".faded",
+          style: {
+            opacity: 0.15
           }
         }
       ],
@@ -719,7 +834,13 @@ function onNodeSearch(query) {
 
   cy.elements().removeClass("highlight-search");
 
-  if (!q) return;
+  if (!q) {
+    const hasSelected = cy.nodes(".selected-node").length > 0;
+    if (!hasSelected) {
+      cy.elements().removeClass("faded");
+    }
+    return;
+  }
 
   const matches = cy.nodes().filter((node) => {
     const label = (node.data("label") || "").toLowerCase();
@@ -729,6 +850,7 @@ function onNodeSearch(query) {
 
   if (matches.length > 0) {
     matches.addClass("highlight-search");
+    matches.removeClass("faded");
     cy.animate({
       center: { eles: matches.first() },
       zoom: 1.2,
@@ -747,8 +869,13 @@ function resetInspector() {
   if (placeholder) placeholder.style.display = "block";
   if (details) details.style.display = "none";
   if (cy) {
-    cy.nodes().removeClass("selected-node");
-    cy.elements().removeClass("highlight-blast");
+    cy.elements().removeClass(
+      "selected-node highlight-caller highlight-callee highlight-edge-incoming highlight-edge-outgoing highlight-blast highlight-search faded"
+    );
+    cy.nodes().unselect();
+  }
+  if (window.innerWidth <= 768) {
+    closeInspector();
   }
 }
 
@@ -760,11 +887,43 @@ async function selectNode(nodeId) {
   if (placeholder) placeholder.style.display = "none";
   if (details) details.style.display = "block";
 
-  // Center & highlight node in graph using exact ID lookup
+  if (window.innerWidth <= 768) {
+    openInspector();
+  }
+
+  // Reset any previous node/edge highlighting and dimming
+  cy.elements().removeClass(
+    "selected-node highlight-caller highlight-callee highlight-edge-incoming highlight-edge-outgoing highlight-blast highlight-search faded"
+  );
+
+  // Center & highlight target node in Cytoscape
   const targetNode = cy.getElementById(nodeId);
-  cy.nodes().removeClass("selected-node");
   if (targetNode && targetNode.length > 0) {
     targetNode.addClass("selected-node");
+
+    // Immediately identify callers (incomers) and callees (outgoers) in graph topology
+    const inEdges = targetNode.incomers("edge");
+    const callerNodes = targetNode.incomers("node");
+
+    const outEdges = targetNode.outgoers("edge");
+    const calleeNodes = targetNode.outgoers("node");
+
+    callerNodes.addClass("highlight-caller");
+    inEdges.addClass("highlight-edge-incoming");
+
+    calleeNodes.addClass("highlight-callee");
+    outEdges.addClass("highlight-edge-outgoing");
+
+    // Active subnetwork: target, callers, callees, and connecting edges
+    const activeElements = targetNode
+      .union(callerNodes)
+      .union(calleeNodes)
+      .union(inEdges)
+      .union(outEdges);
+
+    // Dim all unrelated background elements for laser focus
+    cy.elements().not(activeElements).addClass("faded");
+
     cy.animate({
       center: { eles: targetNode },
       zoom: Math.max(cy.zoom(), 0.9),
@@ -834,6 +993,20 @@ async function selectNode(nodeId) {
           )
           .join("");
         callersCard.style.display = "block";
+
+        // Reinforce caller nodes and incoming edges from verified API data
+        data.callers.forEach((c) => {
+          const cNode = cy.getElementById(c.id);
+          if (cNode && cNode.length > 0) {
+            cNode.addClass("highlight-caller");
+            cNode.removeClass("faded");
+            const inEdge = cy.edges(`[source = "${c.id}"][target = "${nodeId}"]`);
+            if (inEdge && inEdge.length > 0) {
+              inEdge.addClass("highlight-edge-incoming");
+              inEdge.removeClass("faded");
+            }
+          }
+        });
       } else {
         callersCard.style.display = "none";
       }
@@ -855,6 +1028,20 @@ async function selectNode(nodeId) {
           )
           .join("");
         calleesCard.style.display = "block";
+
+        // Reinforce callee nodes and outgoing edges from verified API data
+        data.callees.forEach((c) => {
+          const cNode = cy.getElementById(c.id);
+          if (cNode && cNode.length > 0) {
+            cNode.addClass("highlight-callee");
+            cNode.removeClass("faded");
+            const outEdge = cy.edges(`[source = "${nodeId}"][target = "${c.id}"]`);
+            if (outEdge && outEdge.length > 0) {
+              outEdge.addClass("highlight-edge-outgoing");
+              outEdge.removeClass("faded");
+            }
+          }
+        });
       } else {
         calleesCard.style.display = "none";
       }
@@ -889,8 +1076,6 @@ async function selectNode(nodeId) {
     const blastEl = document.getElementById("node-blast-radius");
     if (blastEl) {
       blastEl.innerHTML = "";
-      cy.elements().removeClass("highlight-blast");
-
       if (data.blastRadius && data.blastRadius.length > 0) {
         data.blastRadius.forEach((b) => {
           blastEl.innerHTML += `
@@ -899,9 +1084,12 @@ async function selectNode(nodeId) {
               <span class="badge" style="background:#ef444433; color:#fca5a5;">Depth ${b.depth}</span>
             </div>
           `;
-          const blastNode = cy.getElementById(b.id);
-          if (blastNode && blastNode.length > 0) {
-            blastNode.addClass("highlight-blast");
+          if (b.id !== nodeId) {
+            const blastNode = cy.getElementById(b.id);
+            if (blastNode && blastNode.length > 0) {
+              blastNode.addClass("highlight-blast");
+              blastNode.removeClass("faded");
+            }
           }
         });
       } else {
@@ -922,9 +1110,9 @@ function copyNodeCode() {
 
 function resetHighlights() {
   if (cy) {
-    cy.elements().removeClass("highlight-blast");
-    cy.elements().removeClass("highlight-search");
-    cy.nodes().removeClass("selected-node");
+    cy.elements().removeClass(
+      "selected-node highlight-caller highlight-callee highlight-edge-incoming highlight-edge-outgoing highlight-blast highlight-search faded"
+    );
     cy.nodes().unselect();
   }
   const searchInput = document.getElementById("node-search");
@@ -1157,6 +1345,7 @@ function switchIngestSource(source) {
 }
 
 function openIngestModal() {
+  if (window.innerWidth <= 768) toggleSidebar(false);
   const alertEl = document.getElementById("ingest-error-alert");
   if (alertEl) alertEl.style.display = "none";
   document.getElementById("ingest-modal").style.display = "flex";
@@ -1520,6 +1709,7 @@ async function executeResumeSummarization() {
 let currentAuthTab = "signin";
 
 function openAuthModal() {
+  if (window.innerWidth <= 768) toggleSidebar(false);
   document.getElementById("auth-alert").style.display = "none";
   document.getElementById("auth-modal").style.display = "flex";
 }
@@ -1610,6 +1800,7 @@ function updateAuthUI() {
 }
 
 async function openApiKeyModal() {
+  if (window.innerWidth <= 768) toggleSidebar(false);
   document.getElementById("key-new-container").style.display = "none";
   document.getElementById("apikey-modal").style.display = "flex";
   await loadApiKeys();
@@ -1710,3 +1901,9 @@ window.onload = async () => {
   updateAuthUI();
   await loadRepositoriesList();
 };
+
+window.addEventListener("resize", () => {
+  if (cy) {
+    cy.resize();
+  }
+});

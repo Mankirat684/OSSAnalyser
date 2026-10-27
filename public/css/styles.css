@@ -121,40 +121,51 @@ header {
 }
 
 .graph-controls {
-  position: absolute;
-  top: 16px;
-  left: 16px;
-  background: rgba(30, 41, 59, 0.85);
-  backdrop-filter: blur(8px);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  padding: 8px;
+  position: static;
+  background: transparent;
+  backdrop-filter: none;
+  border: none;
+  border-radius: 0;
+  padding: 0;
   display: flex;
+  align-items: center;
   gap: 8px;
   z-index: 5;
+  margin-left: auto;
 }
 
 .graph-controls button {
   background: var(--bg-card);
   color: var(--text-main);
   border: 1px solid var(--border-color);
-  padding: 6px 10px;
-  border-radius: 4px;
+  padding: 6px 12px;
+  border-radius: 6px;
   font-size: 0.78rem;
+  font-weight: 500;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.15s ease;
+  white-space: nowrap;
 }
 
-.graph-controls button:hover { background: var(--primary); }
+.graph-controls button:hover {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #ffffff;
+}
 
 .graph-search-input {
   background: var(--bg-dark);
   color: var(--text-main);
   border: 1px solid var(--border-color);
-  padding: 6px 10px;
-  border-radius: 4px;
+  padding: 6px 12px;
+  border-radius: 6px;
   font-size: 0.78rem;
   outline: none;
   min-width: 170px;
+  transition: border-color 0.15s ease;
 }
 .graph-search-input:focus { border-color: var(--primary); }
 
@@ -214,15 +225,17 @@ header {
   position: absolute;
   bottom: 16px;
   left: 16px;
-  background: rgba(30, 41, 59, 0.85);
+  background: rgba(15, 23, 42, 0.9);
   backdrop-filter: blur(8px);
   border: 1px solid var(--border-color);
   border-radius: 8px;
-  padding: 10px 14px;
-  font-size: 0.75rem;
+  padding: 8px 14px;
+  font-size: 0.74rem;
   display: flex;
+  flex-wrap: wrap;
   gap: 12px;
   z-index: 5;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
 }
 
 .legend-item { display: flex; align-items: center; gap: 6px; }
@@ -287,7 +300,26 @@ header {
 .ownership-bar { height: 6px; background: #334155; border-radius: 3px; overflow: hidden; margin-top: 4px; }
 .ownership-fill { height: 100%; background: var(--accent); }
 
-.code-preview { background: #050811; border-radius: 6px; padding: 10px; font-family: monospace; font-size: 0.8rem; max-height: 200px; overflow-y: auto; white-space: pre; border: 1px solid #1e293b; }
+.code-preview {
+  background: #050811;
+  border-radius: 6px;
+  padding: 10px;
+  font-family: monospace;
+  font-size: 0.8rem;
+  max-height: 200px;
+  overflow-y: auto;
+  overflow-x: auto;
+  white-space: pre;
+  border: 1px solid #1e293b;
+  -webkit-overflow-scrolling: touch;
+}
+
+.bubble-ai pre {
+  overflow-x: auto;
+  max-width: 100%;
+  white-space: pre;
+  -webkit-overflow-scrolling: touch;
+}
 
 .blast-item {
   display: flex;
@@ -966,12 +998,6 @@ header {
   cursor: pointer;
 }
 
-@media (max-width: 768px) {
-  .mobile-menu-btn { display: block; }
-  .sidebar { position: absolute; transform: translateX(-100%); }
-  .sidebar.open { transform: translateX(0); }
-}
-
 .chat-thread-info {
   display: flex;
   align-items: center;
@@ -1135,8 +1161,18 @@ header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: var(--bg-panel);
-  z-index: 5;
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(8px);
+  z-index: 10;
+  gap: 16px;
+}
+
+.graph-topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  flex-shrink: 0;
 }
 
 .graph-content-wrapper {
@@ -1180,5 +1216,409 @@ header {
   margin-top: 40px;
   font-size: 0.85rem;
   line-height: 1.5;
+}
+
+/* ==========================================================================
+   Mobile & Responsive Architecture
+   ========================================================================== */
+
+/* Mobile backdrop overlays */
+.sidebar-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(4px);
+  z-index: 95;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+
+.sidebar-backdrop.active {
+  display: block;
+  opacity: 1;
+}
+
+.inspector-backdrop {
+  display: none;
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(2px);
+  z-index: 25;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+
+.inspector-backdrop.active {
+  display: block;
+  opacity: 1;
+}
+
+/* Mobile buttons & handles hidden on desktop */
+.mobile-sidebar-close {
+  display: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px 8px;
+}
+.mobile-sidebar-close:hover {
+  color: var(--text-main);
+}
+
+.mobile-inspector-toggle {
+  display: none;
+}
+
+.mobile-sheet-handle {
+  display: none;
+  width: 40px;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.25);
+  border-radius: 2px;
+  margin: 0 auto 12px;
+  cursor: grab;
+}
+
+.mobile-close-inspector {
+  display: none;
+}
+
+/* Responsive adjustments for Tablets & Mobile (<= 768px) */
+@media (max-width: 768px) {
+  /* 1. App Shell & Left Sidebar */
+  .mobile-menu-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.15rem;
+    padding: 6px;
+    border-radius: 6px;
+  }
+
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    height: 100vh;
+    width: 82%;
+    max-width: 320px;
+    z-index: 100;
+    box-shadow: 8px 0 32px rgba(0, 0, 0, 0.75);
+    transform: translateX(-100%);
+    transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .sidebar.open {
+    transform: translateX(0);
+  }
+
+  .mobile-sidebar-close {
+    display: inline-flex;
+    margin-left: auto;
+  }
+
+  .chat-thread-item .btn-delete-thread {
+    opacity: 0.6;
+  }
+
+  /* 2. Chat View */
+  .chat-topbar {
+    padding: 0 12px;
+    height: 52px;
+    min-height: 52px;
+  }
+
+  .chat-thread-info {
+    max-width: 170px;
+    overflow: hidden;
+  }
+
+  .chat-repo-badge {
+    max-width: 90px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.72rem;
+    padding: 2px 6px;
+  }
+
+  .chat-thread-title {
+    max-width: 90px;
+    font-size: 0.75rem;
+  }
+
+  .chat-topbar-actions {
+    gap: 6px;
+  }
+
+  .chat-topbar-actions .btn {
+    padding: 6px 9px;
+    font-size: 0.74rem;
+  }
+
+  .chat-feed-container {
+    padding: 14px 12px 10px;
+  }
+
+  .chat-bubble {
+    max-width: 95%;
+    font-size: 0.86rem;
+    padding: 10px 12px;
+    word-break: break-word;
+  }
+
+  .bubble-ai pre,
+  .code-preview {
+    font-size: 0.75rem;
+    padding: 8px 10px;
+  }
+
+  .chat-input-area {
+    padding: 8px 12px 14px;
+  }
+
+  .chat-input-wrapper {
+    padding: 8px 12px;
+    border-radius: 12px;
+    gap: 8px;
+  }
+
+  .chat-textarea {
+    font-size: 1rem; /* 16px minimum prevents iOS zoom */
+    padding: 4px 0;
+  }
+
+  .btn-send {
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+  }
+
+  .chat-disclaimer {
+    font-size: 0.68rem;
+    margin-top: 4px;
+  }
+
+  /* 3. Graph View */
+  .graph-topbar {
+    height: auto;
+    min-height: 52px;
+    padding: 8px 12px;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .graph-topbar-left {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    gap: 8px;
+  }
+
+  .graph-repo-heading {
+    font-size: 0.8rem;
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+  }
+
+  .mobile-inspector-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px;
+    font-size: 0.75rem;
+    border-radius: 6px;
+    flex-shrink: 0;
+    margin-left: auto;
+    background: rgba(30, 41, 59, 0.9);
+    border: 1px solid rgba(56, 189, 248, 0.4);
+    color: #38bdf8;
+    cursor: pointer;
+  }
+
+  .mobile-inspector-toggle.active {
+    background: var(--primary);
+    color: #ffffff;
+    border-color: var(--primary);
+  }
+
+  .graph-controls {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .graph-controls button {
+    padding: 6px 9px;
+    font-size: 0.74rem;
+    flex-shrink: 0;
+  }
+
+  .graph-search-input {
+    flex: 1;
+    min-width: 80px;
+    padding: 6px 10px;
+    font-size: 0.78rem;
+  }
+
+  .graph-content-wrapper {
+    height: calc(100vh - 100px);
+    position: relative;
+    width: 100%;
+    overflow: hidden;
+  }
+
+  .graph-canvas-box {
+    width: 100%;
+    height: 100%;
+    position: absolute;
+    inset: 0;
+  }
+
+  .graph-legend {
+    bottom: 8px;
+    left: 8px;
+    right: 8px;
+    width: auto;
+    max-width: calc(100% - 16px);
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    padding: 6px 10px;
+    font-size: 0.68rem;
+    gap: 8px;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .graph-legend::-webkit-scrollbar {
+    display: none;
+  }
+
+  .legend-item {
+    flex-shrink: 0;
+  }
+
+  /* Node Inspector as Bottom Sheet on Mobile */
+  .graph-inspector-pane {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    min-width: 100%;
+    max-height: 74vh;
+    border-left: none;
+    border-top: 2px solid var(--primary);
+    border-radius: 18px 18px 0 0;
+    background: rgba(11, 17, 32, 0.98);
+    backdrop-filter: blur(14px);
+    box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.8);
+    z-index: 30;
+    padding: 12px 16px 24px;
+    transform: translateY(100%);
+    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .graph-inspector-pane.open {
+    transform: translateY(0);
+  }
+
+  .mobile-sheet-handle {
+    display: block;
+  }
+
+  .inspector-header {
+    justify-content: space-between;
+    margin-bottom: 14px;
+  }
+
+  .mobile-close-inspector {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px 8px;
+    border-radius: 4px;
+  }
+
+  /* 4. Pipeline Tracker on Mobile */
+  .pipeline-tracker {
+    padding: 10px 14px;
+  }
+
+  .tracker-title {
+    font-size: 0.8rem;
+  }
+
+  .tracker-stepper {
+    padding: 0;
+    margin: 6px 0;
+  }
+
+  .tracker-step .step-label {
+    display: none;
+  }
+
+  .step-num {
+    width: 24px;
+    height: 24px;
+    font-size: 0.72rem;
+  }
+
+  .step-divider {
+    height: 2px;
+  }
+
+  /* 5. Modals on Mobile */
+  .modal-content {
+    width: 94%;
+    max-width: 100%;
+    padding: 18px 16px;
+    max-height: 90vh;
+    border-radius: 12px;
+    overflow-y: auto;
+  }
+}
+
+/* Extra Small Mobile Screens (<= 480px) */
+@media (max-width: 480px) {
+  .control-label {
+    display: none;
+  }
+
+  .topbar-btn-text {
+    display: none;
+  }
+
+  .chat-action-text {
+    display: none;
+  }
+
+  .graph-repo-heading {
+    max-width: 105px;
+    font-size: 0.76rem;
+  }
+
+  .chat-repo-badge {
+    max-width: 75px;
+  }
+
+  .chat-thread-title {
+    display: none;
+  }
+
+  .chat-breadcrumb-divider {
+    display: none;
+  }
 }
 

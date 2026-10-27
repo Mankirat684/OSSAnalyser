@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>OSS Analyser — Developer Onboarding & Code Graph Copilot</title>
   <script src="https://unpkg.com/cytoscape@3.28.1/dist/cytoscape.min.js"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
@@ -71,6 +71,9 @@
           <i class="fa-solid fa-diagram-project"></i>
           <span>OSS Analyser</span>
         </div>
+        <button class="btn-icon mobile-sidebar-close" onclick="toggleSidebar(false)" title="Close menu">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
       </div>
 
       <div class="sidebar-action-bar">
@@ -109,6 +112,9 @@
       </div>
     </aside>
 
+    <!-- Mobile Sidebar Backdrop Overlay -->
+    <div id="sidebar-backdrop" class="sidebar-backdrop" onclick="toggleSidebar(false)"></div>
+
     <!-- Main View Area -->
     <main class="main-content">
 
@@ -124,11 +130,11 @@
             </div>
           </div>
           <div class="chat-topbar-actions">
-            <button id="btn-chat-view-graph" class="btn btn-secondary btn-sm" onclick="switchToGraphView()" style="display: none;">
-              <i class="fa-solid fa-circle-nodes"></i> View Code Graph
+            <button id="btn-chat-view-graph" class="btn btn-secondary btn-sm" onclick="switchToGraphView()" style="display: none;" title="Explore Code Graph">
+              <i class="fa-solid fa-circle-nodes"></i> <span class="chat-action-text">Graph</span>
             </button>
-            <button id="btn-chat-summarize" class="btn btn-secondary btn-sm" onclick="openResumeModal()" style="display: none;">
-              <i class="fa-solid fa-play"></i> Summarize
+            <button id="btn-chat-summarize" class="btn btn-secondary btn-sm" onclick="openResumeModal()" style="display: none;" title="Resume Summarization">
+              <i class="fa-solid fa-play"></i> <span class="chat-action-text">Summarize</span>
             </button>
           </div>
         </div>
@@ -161,17 +167,21 @@
       <!-- View 2: Cytoscape Dependency Graph Explorer -->
       <section id="view-graph" class="view-panel">
         <div class="graph-topbar">
-          <div style="display: flex; align-items: center; gap: 10px;">
-            <button class="btn btn-primary btn-sm" onclick="switchToChatView()">
-              <i class="fa-solid fa-comments"></i> Back to Chat
+          <div class="graph-topbar-left">
+            <button id="btn-back-to-copilot" class="btn btn-secondary btn-sm" onclick="switchToChatView()" title="Back to Chat Copilot">
+              <i class="fa-solid fa-arrow-left"></i> <span class="topbar-btn-text">Back</span>
             </button>
-            <span id="graph-repo-heading" style="font-weight: 600; color: var(--text-main); font-size: 0.9rem;"></span>
+            <span class="chat-breadcrumb-divider">/</span>
+            <span id="graph-repo-heading" class="graph-repo-heading" style="font-weight: 600; color: var(--text-main); font-size: 0.9rem;"></span>
+            <button id="btn-mobile-inspector-toggle" class="btn btn-secondary btn-sm mobile-inspector-toggle" onclick="toggleInspector()" title="Toggle Node Inspector">
+              <i class="fa-solid fa-circle-info"></i> <span class="mobile-inspector-btn-text">Inspector</span>
+            </button>
           </div>
           <div class="graph-controls">
-            <button onclick="setLayout('cose')"><i class="fa-solid fa-circle-nodes"></i> Force</button>
-            <button onclick="setLayout('breadthfirst')"><i class="fa-solid fa-sitemap"></i> Topo</button>
-            <button onclick="resetHighlights()"><i class="fa-solid fa-eye"></i> Reset</button>
-            <button onclick="fitGraph()"><i class="fa-solid fa-compress"></i> Fit</button>
+            <button onclick="setLayout('cose')" title="Physics force-directed layout"><i class="fa-solid fa-circle-nodes"></i> <span class="control-label">Force</span></button>
+            <button onclick="setLayout('breadthfirst')" title="Topological hierarchy layout"><i class="fa-solid fa-sitemap"></i> <span class="control-label">Topo</span></button>
+            <button onclick="resetHighlights()" title="Reset highlights and zoom"><i class="fa-solid fa-rotate-left"></i> <span class="control-label">Reset</span></button>
+            <button onclick="fitGraph()" title="Fit graph to view"><i class="fa-solid fa-compress"></i> <span class="control-label">Fit</span></button>
             <input type="text" id="node-search" class="graph-search-input" placeholder="Search symbol..." oninput="onNodeSearch(this.value)" />
           </div>
         </div>
@@ -179,10 +189,12 @@
         <div class="graph-content-wrapper">
           <div class="graph-canvas-box">
             <div class="graph-legend">
-              <div class="legend-item"><div class="legend-dot" style="background: #3b82f6;"></div> Function / Method</div>
-              <div class="legend-item"><div class="legend-dot" style="background: #10b981;"></div> File / Module</div>
-              <div class="legend-item"><div class="legend-dot" style="background: #f59e0b;"></div> Directory Subsystem</div>
-              <div class="legend-item"><div class="legend-dot" style="background: #ef4444;"></div> Blast Radius Impact</div>
+              <div class="legend-item"><div class="legend-dot" style="background: #38bdf8; box-shadow: 0 0 6px #38bdf8;"></div> Selected</div>
+              <div class="legend-item"><div class="legend-dot" style="background: #0ea5e9; box-shadow: 0 0 6px #0ea5e9;"></div> Caller (In)</div>
+              <div class="legend-item"><div class="legend-dot" style="background: #a855f7; box-shadow: 0 0 6px #a855f7;"></div> Callee (Out)</div>
+              <div class="legend-item"><div class="legend-dot" style="background: #3b82f6;"></div> Function</div>
+              <div class="legend-item"><div class="legend-dot" style="background: #10b981;"></div> File</div>
+              <div class="legend-item"><div class="legend-dot" style="background: #ef4444; box-shadow: 0 0 6px #ef4444;"></div> Blast Radius</div>
             </div>
             <div id="graph-empty-state" class="graph-empty-overlay">
               <i class="fa-solid fa-diagram-project"></i>
@@ -193,10 +205,15 @@
             <div id="cy"></div>
           </div>
 
-          <!-- Node Inspector Slide-out Panel on the Right -->
-          <div class="graph-inspector-pane">
+          <!-- Mobile Backdrop for Node Inspector Bottom Sheet -->
+          <div id="inspector-backdrop" class="inspector-backdrop" onclick="closeInspector()"></div>
+
+          <!-- Node Inspector Slide-out Panel on Desktop / Bottom Sheet on Mobile -->
+          <div class="graph-inspector-pane" id="graph-inspector-pane">
+            <div class="mobile-sheet-handle"></div>
             <div class="inspector-header">
               <span><i class="fa-solid fa-circle-info"></i> Node Inspector</span>
+              <button class="btn-icon-small mobile-close-inspector" onclick="closeInspector()" title="Close Inspector"><i class="fa-solid fa-xmark"></i></button>
             </div>
             <div id="inspector-placeholder" class="inspector-placeholder">
               Click on any node in the dependency graph to inspect its code, hierarchical summary, Git ownership, and blast radius.
