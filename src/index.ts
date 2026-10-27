@@ -13,8 +13,16 @@ async function bootstrap() {
 
   const app = createApp();
 
-  // Start background queue worker
-  createIngestWorker(1);
+  // Start background queue worker if Redis is configured or running locally
+  if (config.redis.url || !config.hostedDemo.isHostedDemo) {
+    try {
+      createIngestWorker(1);
+    } catch (err: any) {
+      console.warn("[Worker] Ingestion queue worker skipped:", err?.message || err);
+    }
+  } else {
+    console.log("ℹ️  Ingestion Worker paused (Running in read-only demo mode without Redis)");
+  }
 
   app.listen(config.server.port, () => {
     console.log(`\n🚀 OSS Analyser running on http://localhost:${config.server.port}`);

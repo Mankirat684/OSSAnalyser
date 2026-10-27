@@ -16,7 +16,6 @@ export interface ExportCommandOptions {
 export async function runExportCommand(options: ExportCommandOptions): Promise<void> {
   const repoRoot = path.resolve(options.repo || process.cwd());
   const repoName = path.basename(repoRoot);
-  const repoId = `repo_${repoName.replace(/[^a-zA-Z0-9_]/g, "_")}`;
   const dbPath = path.join(repoRoot, ".oss-analyser", "knowledge.db");
 
   if (!fs.existsSync(dbPath) && !options.importDump) {
@@ -25,6 +24,9 @@ export async function runExportCommand(options: ExportCommandOptions): Promise<v
 
   const store = new SQLiteStore(dbPath);
   await store.init();
+
+  const firstRepo = await store.getFirstRepository();
+  const repoId = firstRepo?.id || `repo_${repoName.replace(/[^a-zA-Z0-9_]/g, "_")}`;
 
   try {
     // 1. Import from JSON dump
